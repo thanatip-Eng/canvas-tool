@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "/Users/thanatip/Documents/GitHub/canvas-tools/node_modules/.bin/next",
+      "runtimeArgs": ["dev"],
+      "port": 3000
+    }
+  ]
+}
