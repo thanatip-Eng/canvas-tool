@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb } from './firebase-admin';
+import { checkRateLimit } from './rate-limit';
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -26,12 +27,22 @@ export async function requireAuth(req: NextRequest): Promise<AuthedUser> {
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : null;
   if (!token) throw new ApiError('Missing Authorization header', 401);
 
+  let decoded;
   try {
-    const decoded = await getAdminAuth().verifyIdToken(token);
-    return { uid: decoded.uid, email: decoded.email };
+    decoded = await getAdminAuth().verifyIdToken(token);
   } catch {
     throw new ApiError('Invalid or expired ID token', 401);
   }
+
+  const rl = await checkRateLimit(decoded.uid);
+  if (!rl.ok) {
+    throw new ApiError(
+      `Rate limit exceeded. Retry in ${rl.retryAfterSeconds}s.`,
+      429
+    );
+  }
+
+  return { uid: decoded.uid, email: decoded.email };
 }
 
 /**
