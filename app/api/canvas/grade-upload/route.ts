@@ -4,6 +4,7 @@ import { requireAuth, getCanvasCreds, toErrorResponse } from '@/lib/api-auth';
 const BATCH_SIZE = 5;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
+const MAX_GRADES_PER_REQUEST = 1000;
 
 interface GradeEntry {
   sisUserId: string;
@@ -68,6 +69,13 @@ export async function POST(request: NextRequest) {
 
     if (!grades || !Array.isArray(grades) || grades.length === 0) {
       return NextResponse.json({ error: 'Missing or empty grades array' }, { status: 400 });
+    }
+
+    if (grades.length > MAX_GRADES_PER_REQUEST) {
+      return NextResponse.json(
+        { error: `Too many grades in one request (max ${MAX_GRADES_PER_REQUEST}). Split into multiple uploads.` },
+        { status: 400 }
+      );
     }
 
     const canvasHeaders = {

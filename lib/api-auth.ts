@@ -34,6 +34,10 @@ export async function requireAuth(req: NextRequest): Promise<AuthedUser> {
     throw new ApiError('Invalid or expired ID token', 401);
   }
 
+  if (!isEmailAllowed(decoded.email)) {
+    throw new ApiError('Account not authorized for this app', 403);
+  }
+
   const rl = await checkRateLimit(decoded.uid);
   if (!rl.ok) {
     throw new ApiError(
@@ -43,6 +47,24 @@ export async function requireAuth(req: NextRequest): Promise<AuthedUser> {
   }
 
   return { uid: decoded.uid, email: decoded.email };
+}
+
+/**
+ * Check the user's email against the ALLOWED_EMAILS env var (comma-separated).
+ * Entries starting with `@` are treated as domain matches (e.g. `@cmu.ac.th`).
+ * If ALLOWED_EMAILS is unset, all authenticated users are allowed.
+ */
+function isEmailAllowed(email: string | undefined): boolean {
+  const allowlist = process.env.ALLOWED_EMAILS;
+  if (!allowlist) return true;
+  if (!email) return false;
+
+  const e = email.toLowerCase();
+  return allowlist
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .some((entry) => (entry.startsWith('@') ? e.endsWith(entry) : e === entry));
 }
 
 /**
