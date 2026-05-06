@@ -1,40 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth, assertOwnsStoragePath, toErrorResponse, ApiError } from '@/lib/api-auth';
 
 /**
  * Server-side proxy for uploading files to Firebase Storage.
- * Bypasses CORS restrictions that block client-side requests from localhost.
- *
- * POST body: FormData with fields:
- *   - file: File/Blob to upload
- *   - storagePath: string
- *   - token: string (Firebase Auth ID token)
+ * Originally added to bypass localhost CORS; once cors.json includes the prod
+ * origin, the client can hit Firebase Storage directly with the same ID token.
  */
 export async function POST(request: NextRequest) {
   try {
+    const { uid } = await requireAuth(request);
+
     const formData = await request.formData();
     const file = formData.get('file') as Blob | null;
     const storagePath = formData.get('storagePath') as string | null;
-    const token = formData.get('token') as string | null;
 
-    if (!file || !storagePath || !token) {
-      return NextResponse.json(
-        { error: 'file, storagePath, and token are required' },
-        { status: 400 }
-      );
+    if (!file || !storagePath) {
+      throw new ApiError('file and storagePath are required', 400);
     }
+
+    assertOwnsStoragePath(uid, storagePath);
 
     const bucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
     if (!bucket) {
-      return NextResponse.json(
-        { error: 'Storage bucket not configured' },
-        { status: 500 }
-      );
+      throw new ApiError('Storage bucket not configured', 500);
     }
 
-    // Upload via Firebase Storage REST API
+    // Forward the original ID token to Firebase Storage so its security rules
+    // run as a second layer of defense.
+    const token = request.headers.get('Authorization')!.slice(7).trim();
+
     const encodedPath = encodeURIComponent(storagePath);
     const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}`;
-
     const buffer = await file.arrayBuffer();
 
     const response = await fetch(url, {
@@ -60,11 +56,7 @@ export async function POST(request: NextRequest) {
       storagePath,
       fileSize: metadata.size ? Number(metadata.size) : buffer.byteLength,
     });
-  } catch (error) {
-    console.error('Storage upload proxy error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+  } catch (err) {
+    return toErrorResponse(err);
   }
 }

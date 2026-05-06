@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import DataTable from '@/components/ui/DataTable';
 import StatCard from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
 import { buildXlsx, buildXlsxMultiSheet, downloadXlsx } from '@/lib/xlsx-utils';
 import { stripHtml } from '@/lib/html-utils';
+import { apiGet } from '@/lib/api-client';
 import type { Quiz, Assignment, Section } from '@/types';
 
 interface StudentInfo {
@@ -28,7 +28,6 @@ interface ItemResponse {
 }
 
 export default function ProjectResponseExportPage() {
-  const { apiKey, canvasUrl } = useAuth();
   const { project, saveOutput } = useProject();
   const { showToast, ToastContainer } = useToast();
 
@@ -46,24 +45,19 @@ export default function ProjectResponseExportPage() {
   const [saving, setSaving] = useState(false);
 
   const courseId = project?.canvasCourseId;
-  const apiParams = `apiKey=${encodeURIComponent(apiKey)}&canvasUrl=${encodeURIComponent(canvasUrl)}`;
 
-  // Fetch quizzes & assignments on mount
   useEffect(() => {
     if (!courseId) return;
 
     const fetchItems = async () => {
       setLoadingItems(true);
       try {
-        const [sectionsRes, quizzesRes, assignmentsRes] = await Promise.all([
-          fetch(`/api/canvas/sections?${apiParams}&courseId=${courseId}`),
-          fetch(`/api/canvas/quizzes?${apiParams}&courseId=${courseId}`),
-          fetch(`/api/canvas/assignments?${apiParams}&courseId=${courseId}`),
+        const cid = { courseId: String(courseId) };
+        const [sectionsData, quizzesData, assignmentsData] = await Promise.all([
+          apiGet<{ sections?: Section[] }>('/api/canvas/sections', cid),
+          apiGet<{ quizzes?: Quiz[] }>('/api/canvas/quizzes', cid),
+          apiGet<{ assignments?: Assignment[] }>('/api/canvas/assignments', cid),
         ]);
-        const sectionsData = await sectionsRes.json();
-        const quizzesData = await quizzesRes.json();
-        const assignmentsData = await assignmentsRes.json();
-
         setSections(sectionsData.sections || []);
         setQuizzes(quizzesData.quizzes || []);
         setAssignments(assignmentsData.assignments || []);
@@ -75,7 +69,7 @@ export default function ProjectResponseExportPage() {
     };
 
     fetchItems();
-  }, [courseId, apiParams, showToast]);
+  }, [courseId, showToast]);
 
   // Fetch responses for selected items
   const fetchResponses = useCallback(async () => {
@@ -89,11 +83,7 @@ export default function ProjectResponseExportPage() {
     setFetchProgress('กำลังดึงข้อมูลนักศึกษา...');
 
     try {
-      // Fetch students
-      const studentsRes = await fetch(
-        `/api/canvas/students?${apiParams}&courseId=${courseId}`
-      );
-      const studentsData = await studentsRes.json();
+      const studentsData = await apiGet<{ students?: any[] }>('/api/canvas/students', { courseId: String(courseId) });
       const rawStudents = studentsData.students || [];
 
       const sectionMap = new Map(sections.map((s) => [s.id, s.name]));
@@ -125,10 +115,10 @@ export default function ProjectResponseExportPage() {
           `กำลังดึงคำตอบ Quiz: ${quiz.title} (${i + 1}/${selectedQuizzes.length})`
         );
 
-        const res = await fetch(
-          `/api/canvas/quiz-submissions?${apiParams}&courseId=${courseId}&quizId=${quizId}`
+        const data = await apiGet<{ submissions?: any[]; questions?: any[] }>(
+          '/api/canvas/quiz-submissions',
+          { courseId: String(courseId), quizId: String(quizId) }
         );
-        const data = await res.json();
         const submissions = data.submissions || [];
         const questions = data.questions || [];
 
@@ -190,13 +180,13 @@ export default function ProjectResponseExportPage() {
           assignment.external_tool_tag_attributes?.url?.includes('quiz-lti');
 
         if (isNewQuiz) {
-          const res = await fetch(
-            `/api/canvas/new-quiz-submissions?${apiParams}&courseId=${courseId}&assignmentId=${assignmentId}`
+          const data = await apiGet<{ items?: any[]; submissions?: any[] }>(
+            '/api/canvas/new-quiz-submissions',
+            { courseId: String(courseId), assignmentId: String(assignmentId) }
           );
-          const data = await res.json();
 
-          if (data.items?.length > 0) {
-            const items = data.items;
+          const items = data.items ?? [];
+          if (items.length > 0) {
             const subs = data.submissions || [];
             const qNames = items.map(
               (item: any, idx: number) =>  // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -261,11 +251,10 @@ export default function ProjectResponseExportPage() {
             });
           }
         } else {
-          // Regular assignment
-          const res = await fetch(
-            `/api/canvas/assignment-submissions?${apiParams}&courseId=${courseId}&assignmentId=${assignmentId}`
+          const data = await apiGet<{ submissions?: any[] }>(
+            '/api/canvas/assignment-submissions',
+            { courseId: String(courseId), assignmentId: String(assignmentId) }
           );
-          const data = await res.json();
           const subs = data.submissions || [];
           const studentResponses = new Map<number, string[]>();
 
@@ -305,7 +294,6 @@ export default function ProjectResponseExportPage() {
     quizzes,
     assignments,
     sections,
-    apiParams,
     showToast,
   ]);
 

@@ -1,0 +1,44 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // The user's profile doc holds their Canvas apiKey + canvasUrl.
+    // Validate shape on writes so a compromised client can't store arbitrary data.
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId)
+        && request.resource.data.keys().hasOnly(['apiKey', 'canvasUrl'])
+        && request.resource.data.apiKey is string
+        && request.resource.data.apiKey.size() < 500
+        && request.resource.data.canvasUrl is string
+        && request.resource.data.canvasUrl.matches('^https://.+');
+
+      // Projects, files, outputs, and any future subcollections.
+      // These are written exclusively from the client SDK today, so we keep
+      // them owner-scoped without per-field validation. If you later move
+      // writes server-side via Admin SDK, tighten to `allow read: ...; allow write: if false;`
+      // since Admin SDK bypasses rules.
+      match /projects/{projectId} {
+        allow read, write: if isOwner(userId);
+
+        match /files/{fileId} {
+          allow read, write: if isOwner(userId);
+        }
+
+        match /outputs/{outputId} {
+          allow read, write: if isOwner(userId);
+        }
+      }
+    }
+
+    // Default deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

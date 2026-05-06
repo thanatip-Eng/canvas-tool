@@ -3,6 +3,8 @@ import {
   getDoc,
   setDoc,
   deleteDoc,
+  updateDoc,
+  deleteField,
   collection,
   query,
   orderBy,
@@ -123,6 +125,21 @@ export async function uploadProjectFile(
       metadata.lecSection = regInfo.lecSection;
       metadata.labSection = regInfo.labSection;
     }
+  } else if (group === 'edpuzzle') {
+    // Extract clip count from "Progress (out of N) (%)" header
+    const progressHeader = parsed.headers.find(h => /progress.*out of/i.test(h));
+    const nMatch = progressHeader?.match(/out of\s+(\d+)/i);
+    if (nMatch) metadata.clipCount = nMatch[1];
+    // Count student rows (Role column = "Student")
+    const roleIdx = parsed.headers.findIndex(h => (h || '').toLowerCase().trim() === 'role');
+    if (roleIdx >= 0) {
+      metadata.studentCount = String(parsed.rows.filter(r => (r[roleIdx] || '').toLowerCase().trim() === 'student').length);
+    }
+  } else if (group === 'master') {
+    // Master data: count students and assignments
+    metadata.studentCount = String(parsed.rows.length);
+    const MASTER_FIXED = 8;
+    metadata.assignmentCount = String(Math.max(0, parsed.headers.length - MASTER_FIXED));
   }
 
   // Upload to Firebase Storage
@@ -301,11 +318,13 @@ export async function downloadOutputFile(storagePath: string): Promise<Blob> {
 export async function saveEdpuzzleConfig(
   userId: string,
   projectId: string,
-  config: { totalClips: number; clipQuestions: number[]; label: string }
+  config: { totalClips: number; clipQuestions: number[]; label: string; playlistName?: string }
 ): Promise<EdpuzzleConfig> {
   const db = getFirebaseDb();
   const projectRef = doc(db, 'users', userId, 'projects', projectId);
-  const configKey = `clips_${config.totalClips}`;
+  const configKey = config.playlistName
+    ? `pl_${config.playlistName.replace(/[^a-zA-Z0-9\u0E00-\u0E7F]/g, '_').substring(0, 40)}`
+    : `clips_${config.totalClips}`;
 
   const data: EdpuzzleConfig = {
     id: configKey,
@@ -314,6 +333,7 @@ export async function saveEdpuzzleConfig(
     label: config.label,
     savedAt: Timestamp.now(),
   };
+  if (config.playlistName) data.playlistName = config.playlistName;
 
   // Merge into the project doc under edpuzzleConfigs map
   await setDoc(projectRef, {
@@ -322,6 +342,38 @@ export async function saveEdpuzzleConfig(
   }, { merge: true });
 
   return data;
+}
+
+/**
+ * Batch save multiple Edpuzzle configs (e.g. from bookmarklet paste).
+ */
+export async function saveEdpuzzleConfigs(
+  userId: string,
+  projectId: string,
+  configs: Array<{ totalClips: number; clipQuestions: number[]; label: string; playlistName: string }>
+): Promise<number> {
+  const db = getFirebaseDb();
+  const projectRef = doc(db, 'users', userId, 'projects', projectId);
+
+  const configMap: Record<string, EdpuzzleConfig> = {};
+  for (const config of configs) {
+    const configKey = `pl_${config.playlistName.replace(/[^a-zA-Z0-9\u0E00-\u0E7F]/g, '_').substring(0, 40)}`;
+    configMap[configKey] = {
+      id: configKey,
+      totalClips: config.totalClips,
+      clipQuestions: config.clipQuestions,
+      label: config.label,
+      playlistName: config.playlistName,
+      savedAt: Timestamp.now(),
+    };
+  }
+
+  await setDoc(projectRef, {
+    edpuzzleConfigs: configMap,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  return configs.length;
 }
 
 /**
@@ -341,6 +393,46 @@ export async function loadEdpuzzleConfig(
   const configs = snapshot.data().edpuzzleConfigs as Record<string, EdpuzzleConfig> | undefined;
   if (!configs) return null;
 
+  // Try exact clip count match first, then search all configs
   const configKey = `clips_${totalClips}`;
-  return configs[configKey] || null;
+  if (configs[configKey]) return configs[configKey];
+
+  // Search by totalClips in all configs
+  const match = Object.values(configs).find(c => c.totalClips === totalClips);
+  return match || null;
+}
+
+/**
+ * Load all saved Edpuzzle configs for a project.
+ */
+export async function loadAllEdpuzzleConfigs(
+  userId: string,
+  projectId: string,
+): Promise<EdpuzzleConfig[]> {
+  const db = getFirebaseDb();
+  const projectRef = doc(db, 'users', userId, 'projects', projectId);
+  const snapshot = await getDoc(projectRef);
+  if (!snapshot.exists()) return [];
+
+  const configs = snapshot.data().edpuzzleConfigs as Record<string, EdpuzzleConfig> | undefined;
+  if (!configs) return [];
+
+  return Object.values(configs);
+}
+
+/**
+ * Delete a saved Edpuzzle config by its ID.
+ * Removes the specific key from the `edpuzzleConfigs` map field on the project document.
+ */
+export async function deleteEdpuzzleConfig(
+  userId: string,
+  projectId: string,
+  configId: string,
+): Promise<void> {
+  const db = getFirebaseDb();
+  const projectRef = doc(db, 'users', userId, 'projects', projectId);
+  await updateDoc(projectRef, {
+    [`edpuzzleConfigs.${configId}`]: deleteField(),
+    updatedAt: serverTimestamp(),
+  });
 }

@@ -3,6 +3,10 @@
 /** Number of fixed columns before assignment columns in Canvas export */
 export const CANVAS_FIXED_COLS = 6;
 
+/** Number of fixed columns before assignment columns in Master Data
+ * Columns: Student, ID, SIS User ID, SIS Login ID, Integration ID, Section, Reg Status, สถานะจับคู่ */
+export const MASTER_FIXED_COLS = 8;
+
 /** Regex to match assignment IDs in Canvas column headers e.g. "Homework 1 (12345)" */
 export const ASSIGNMENT_ID_REGEX = /\((\d+)\)/;
 

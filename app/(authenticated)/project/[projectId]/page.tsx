@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useProject } from '@/contexts/ProjectContext';
 import ProjectFileManager from '@/components/project/ProjectFileManager';
+import MasterDataBuilder from '@/components/project/MasterDataBuilder';
+import StudentSearch from '@/components/project/StudentSearch';
 import OutputHistory from '@/components/project/OutputHistory';
 
 const FEATURES = [
@@ -12,7 +14,7 @@ const FEATURES = [
     title: 'Map คะแนน',
     description: 'จับคู่คะแนนจากไฟล์ภายนอกกับ Canvas assignments',
     color: 'from-teal-500 to-cyan-500',
-    requiresFiles: ['canvas', 'score'] as const,
+    requiresFiles: ['master', 'score'] as const,
   },
   {
     slug: '/status-check',
@@ -20,7 +22,7 @@ const FEATURES = [
     title: 'ตรวจสอบสถานะ',
     description: 'เปรียบเทียบรายชื่อ Canvas กับทะเบียนนักศึกษา',
     color: 'from-blue-500 to-indigo-500',
-    requiresFiles: ['canvas', 'registrar'] as const,
+    requiresFiles: ['master'] as const,
   },
   {
     slug: '/group-export',
@@ -52,7 +54,7 @@ const FEATURES = [
     title: 'วิเคราะห์ Edpuzzle',
     description: 'วิเคราะห์สรุปคะแนน Edpuzzle playlist โดย weight ตามจำนวนคำถาม',
     color: 'from-rose-500 to-orange-500',
-    requiresFiles: ['canvas'] as const,
+    requiresFiles: ['master'] as const,
   },
 ];
 
@@ -87,6 +89,12 @@ export default function ProjectPage() {
 
       {/* File Manager + Output History side by side concept: Files first, then outputs */}
       <ProjectFileManager />
+
+      {/* Master Data Builder — สร้างข้อมูลหลักจาก Canvas + สำนักทะเบียน */}
+      <MasterDataBuilder />
+
+      {/* Student Search — ค้นหานักศึกษาจากข้อมูลหลัก */}
+      <StudentSearch />
 
       {/* Output History — ไฟล์ผลลัพธ์ที่บันทึกจากเครื่องมือต่างๆ */}
       <OutputHistory />

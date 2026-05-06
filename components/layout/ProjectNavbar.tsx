@@ -11,6 +11,10 @@ const FEATURE_ITEMS = [
   { slug: '/group-export', label: 'ส่งออกกลุ่ม', icon: '👥' },
   { slug: '/response-export', label: 'ส่งออกคำตอบ', icon: '📝' },
   { slug: '/grade-compare', label: 'เปรียบเทียบคะแนน', icon: '📈' },
+  { slug: '/grade-export', label: 'ส่งออกเกรด', icon: '📤' },
+  { slug: '/obe-mapping', label: 'CMU OBE', icon: '🎓' },
+  { slug: '/auto-grade', label: 'ให้คะแนนอัตโนมัติ', icon: '⚡' },
+  { slug: '/grade-upload', label: 'อัปโหลดคะแนน', icon: '⬆️' },
 ];
 
 export default function ProjectNavbar() {

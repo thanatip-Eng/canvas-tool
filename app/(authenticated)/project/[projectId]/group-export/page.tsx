@@ -1,22 +1,15 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { buildXlsx, downloadXlsx } from '@/lib/xlsx-utils';
 import { useToast } from '@/components/ui/Toast';
+import { apiGet } from '@/lib/api-client';
 import DataTable from '@/components/ui/DataTable';
 import StatCard from '@/components/ui/StatCard';
 import type { Student, Section, GroupCategory, Group, StudentRow } from '@/types';
 
-function buildQueryString(params: Record<string, string>): string {
-  return Object.entries(params)
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join('&');
-}
-
 export default function ProjectGroupExportPage() {
-  const { apiKey, canvasUrl } = useAuth();
   const { project, saveOutput } = useProject();
   const { showToast, ToastContainer } = useToast();
 
@@ -29,11 +22,6 @@ export default function ProjectGroupExportPage() {
 
   const courseId = project?.canvasCourseId;
 
-  const baseParams = useCallback(
-    () => ({ apiKey, canvasUrl }),
-    [apiKey, canvasUrl]
-  );
-
   // ==================== Fetch Students & Groups ====================
 
   const fetchStudentsAndGroups = useCallback(async () => {
@@ -42,32 +30,21 @@ export default function ProjectGroupExportPage() {
     setStudents([]);
     setGroupCategories([]);
 
-    const params = baseParams();
-
     try {
       // 1. Fetch sections
       setFetchProgress('กำลังดึงข้อมูล Sections...');
-      const sectionsRes = await fetch(
-        `/api/canvas/sections?${buildQueryString({ ...params, courseId: String(courseId) })}`
-      );
-      const sectionsData = await sectionsRes.json();
+      const sectionsData = await apiGet<{ sections?: Section[] }>('/api/canvas/sections', { courseId: String(courseId) });
       const sections: Section[] = sectionsData.sections || [];
       const sectionMap = new Map(sections.map((s) => [s.id, s.name]));
 
       // 2. Fetch students
       setFetchProgress('กำลังดึงข้อมูลนักศึกษา...');
-      const studentsRes = await fetch(
-        `/api/canvas/students?${buildQueryString({ ...params, courseId: String(courseId) })}`
-      );
-      const studentsData = await studentsRes.json();
+      const studentsData = await apiGet<{ students?: Student[] }>('/api/canvas/students', { courseId: String(courseId) });
       const rawStudents: Student[] = studentsData.students || [];
 
       // 3. Fetch group categories
       setFetchProgress('กำลังดึงข้อมูลหมวดหมู่กลุ่ม...');
-      const categoriesRes = await fetch(
-        `/api/canvas/group-categories?${buildQueryString({ ...params, courseId: String(courseId) })}`
-      );
-      const categoriesData = await categoriesRes.json();
+      const categoriesData = await apiGet<{ categories?: GroupCategory[] }>('/api/canvas/group-categories', { courseId: String(courseId) });
       const categories: GroupCategory[] = categoriesData.categories || [];
       setGroupCategories(categories);
 
@@ -78,10 +55,7 @@ export default function ProjectGroupExportPage() {
         setFetchProgress(
           `กำลังดึงกลุ่มในหมวด "${category.name}" (${i + 1}/${categories.length})...`
         );
-        const groupsRes = await fetch(
-          `/api/canvas/groups?${buildQueryString({ ...params, categoryId: String(category.id) })}`
-        );
-        const groupsData = await groupsRes.json();
+        const groupsData = await apiGet<{ groups?: Group[] }>('/api/canvas/groups', { categoryId: String(category.id) });
         categoryGroupMap.set(category.id, groupsData.groups || []);
       }
 
@@ -97,10 +71,10 @@ export default function ProjectGroupExportPage() {
           setFetchProgress(
             `กำลังดึงสมาชิกกลุ่ม "${group.name}" (${groupIndex}/${totalGroups})...`
           );
-          const membersRes = await fetch(
-            `/api/canvas/group-members?${buildQueryString({ ...params, groupId: String(group.id) })}`
+          const membersData = await apiGet<{ members?: Array<{ user_id: number }> }>(
+            '/api/canvas/group-members',
+            { groupId: String(group.id) }
           );
-          const membersData = await membersRes.json();
           const members: Array<{ user_id: number }> = membersData.members || [];
 
           for (const member of members) {
@@ -149,7 +123,7 @@ export default function ProjectGroupExportPage() {
       setLoading(false);
       setFetchProgress('');
     }
-  }, [courseId, baseParams, showToast]);
+  }, [courseId, showToast]);
 
   // ==================== Build XLSX ====================
 

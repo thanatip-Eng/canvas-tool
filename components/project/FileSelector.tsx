@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
 import type { ProjectFile, FileGroup } from '@/types';
 
@@ -27,17 +27,8 @@ function formatDate(timestamp: { seconds: number } | Date): string {
 export default function FileSelector({ group, label, selectedFileId, onSelect }: FileSelectorProps) {
   const { files } = useProject();
   const [isOpen, setIsOpen] = useState(false);
-  const hasAutoSelected = useRef(false);
 
   const groupFiles = files[group];
-
-  // Auto-select the default (most recent) file on first render
-  useEffect(() => {
-    if (!hasAutoSelected.current && groupFiles.length > 0 && !selectedFileId) {
-      hasAutoSelected.current = true;
-      onSelect(groupFiles[0]);
-    }
-  }, [groupFiles, selectedFileId, onSelect]);
 
   if (groupFiles.length === 0) {
     return (
@@ -51,7 +42,7 @@ export default function FileSelector({ group, label, selectedFileId, onSelect }:
 
   const selectedFile = selectedFileId
     ? groupFiles.find((f) => f.id === selectedFileId)
-    : groupFiles[0]; // Default to most recent
+    : null;
 
   return (
     <div className="relative">
@@ -62,20 +53,28 @@ export default function FileSelector({ group, label, selectedFileId, onSelect }:
       >
         <span className="text-lg">📄</span>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium text-[var(--color-text-primary)]">
-              {selectedFile?.originalFilename}
+          {selectedFile ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium text-[var(--color-text-primary)]">
+                  {selectedFile.originalFilename}
+                </span>
+                {selectedFile.id === groupFiles[0]?.id && (
+                  <span className="shrink-0 rounded-full bg-[var(--color-accent)]/20 px-1.5 py-0.5 text-[9px] font-bold text-[var(--color-accent)]">
+                    LATEST
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                {formatDate(selectedFile.uploadedAt as unknown as { seconds: number })}
+                {` · ${selectedFile.rowCount} rows`}
+              </p>
+            </>
+          ) : (
+            <span className="text-sm text-[var(--color-text-muted)]">
+              เลือกไฟล์จาก {groupFiles.length} ไฟล์ที่อัพโหลดไว้
             </span>
-            {selectedFile?.id === groupFiles[0]?.id && (
-              <span className="shrink-0 rounded-full bg-[var(--color-accent)]/20 px-1.5 py-0.5 text-[9px] font-bold text-[var(--color-accent)]">
-                LATEST
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            {selectedFile && formatDate(selectedFile.uploadedAt as unknown as { seconds: number })}
-            {selectedFile && ` · ${selectedFile.rowCount} rows`}
-          </p>
+          )}
         </div>
         <svg
           className={`h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition ${isOpen ? 'rotate-180' : ''}`}
@@ -88,7 +87,7 @@ export default function FileSelector({ group, label, selectedFileId, onSelect }:
       </button>
 
       {/* Dropdown */}
-      {isOpen && groupFiles.length > 1 && (
+      {isOpen && groupFiles.length >= 1 && (
         <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[var(--color-bg-secondary)] shadow-xl">
           {groupFiles.map((file, idx) => (
             <button

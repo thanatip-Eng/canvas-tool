@@ -1,68 +1,69 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth, getCanvasCreds, toErrorResponse } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams;
-  const apiKey = searchParams.get('apiKey');
-  const canvasUrl = searchParams.get('canvasUrl');
-  const courseId = searchParams.get('courseId');
-  const assignmentId = searchParams.get('assignmentId');
-
-  if (!apiKey || !canvasUrl || !courseId || !assignmentId) {
-    return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
-  }
-
   try {
+    const { uid } = await requireAuth(request);
+    const { apiKey, canvasUrl } = await getCanvasCreds(uid);
+
+    const courseId = request.nextUrl.searchParams.get('courseId');
+    const assignmentId = request.nextUrl.searchParams.get('assignmentId');
+    if (!courseId || !assignmentId) {
+      return NextResponse.json({ error: 'courseId and assignmentId are required' }, { status: 400 });
+    }
+
+    const headers = {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    };
+
     const allSubmissions: any[] = [];
     let nextUrl: string | null = `${canvasUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions?include[]=user&include[]=submission_comments&include[]=rubric_assessment&per_page=100`;
-    
+
     while (nextUrl) {
-      const response: Response = await fetch(nextUrl, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response: Response = await fetch(nextUrl, { headers });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Assignment submissions error:', response.status, errorText);
-        return NextResponse.json({ 
+        return NextResponse.json({
           submissions: [],
-          error: `Canvas API Error: ${response.status}` 
+          error: `Canvas API Error: ${response.status} - ${errorText}`,
         });
       }
 
       const submissions = await response.json();
-      console.log(`Fetched ${submissions.length} submissions for assignment ${assignmentId}`);
-      
-      // Log first submission to see structure
-      if (submissions.length > 0) {
-        console.log('Sample submission keys:', Object.keys(submissions[0]));
-        console.log('Sample submission body:', submissions[0].body?.substring(0, 100));
-      }
-      
       allSubmissions.push(...submissions);
 
       const linkHeader = response.headers.get('Link');
       nextUrl = null;
       if (linkHeader) {
-        const links = linkHeader.split(',');
-        const nextLink = links.find((link: string) => link.includes('rel="next"'));
-        if (nextLink) {
-          const match = nextLink.match(/<([^>]+)>/);
-          if (match) {
-            nextUrl = match[1];
-          }
-        }
+        const nextLink = linkHeader.split(',').find((l) => l.includes('rel="next"'));
+        const match = nextLink?.match(/<([^>]+)>/);
+        if (match) nextUrl = match[1];
       }
     }
 
-    return NextResponse.json({ submissions: allSubmissions });
-  } catch (error) {
-    console.error('Error fetching assignment submissions:', error);
-    return NextResponse.json({ 
-      submissions: [],
-      error: 'Failed to fetch assignment submissions' 
-    });
+    let assignmentDetails: { id: number; name: string; due_at: string | null; points_possible: number | null } | null = null;
+    try {
+      const assignmentRes: Response = await fetch(
+        `${canvasUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}`,
+        { headers }
+      );
+      if (assignmentRes.ok) {
+        const aData = await assignmentRes.json();
+        assignmentDetails = {
+          id: aData.id,
+          name: aData.name,
+          due_at: aData.due_at ?? null,
+          points_possible: aData.points_possible ?? null,
+        };
+      }
+    } catch {
+      // Non-critical
+    }
+
+    return NextResponse.json({ submissions: allSubmissions, assignment: assignmentDetails });
+  } catch (err) {
+    return toErrorResponse(err);
   }
 }

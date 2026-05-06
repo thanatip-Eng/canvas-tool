@@ -4,20 +4,15 @@ import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { getUserProjects, createProject, getProjectId } from '@/lib/project-service';
+import { apiGet } from '@/lib/api-client';
 import type { Course, Project } from '@/types';
-
-function buildQueryString(params: Record<string, string>): string {
-  return Object.entries(params)
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join('&');
-}
 
 interface CourseSelectorProps {
   onSelectProject: (projectId: string) => void;
 }
 
 export default function CourseSelector({ onSelectProject }: CourseSelectorProps) {
-  const { user, apiKey, canvasUrl } = useAuth();
+  const { user } = useAuth();
   const { showToast, ToastContainer } = useToast();
 
   const [courses, setCourses] = useState<Course[]>([]);
@@ -46,28 +41,24 @@ export default function CourseSelector({ onSelectProject }: CourseSelectorProps)
     loadProjects();
   }, [loadProjects]);
 
-  // Fetch courses from Canvas API
   const fetchCourses = useCallback(async () => {
     setLoadingCourses(true);
     try {
-      const params = buildQueryString({ apiKey, canvasUrl });
-      const res = await fetch(`/api/canvas/courses?${params}`);
-      const data = await res.json();
-      if (data.error) {
-        showToast(data.error, 'error');
-        return;
-      }
+      const data = await apiGet<{ courses?: Course[] }>('/api/canvas/courses');
       setCourses(data.courses || []);
       setCoursesFetched(true);
       if ((data.courses || []).length === 0) {
         showToast('ไม่พบรายวิชา กรุณาตรวจสอบ API Key', 'warning');
       }
-    } catch {
-      showToast('ไม่สามารถดึงรายวิชาได้ กรุณาตรวจสอบ API Key และ URL', 'error');
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : 'ไม่สามารถดึงรายวิชาได้ กรุณาตรวจสอบ API Key และ URL',
+        'error'
+      );
     } finally {
       setLoadingCourses(false);
     }
-  }, [apiKey, canvasUrl, showToast]);
+  }, [showToast]);
 
   // Select a course — create project if needed, then navigate
   const handleSelectCourse = useCallback(async (course: Course) => {

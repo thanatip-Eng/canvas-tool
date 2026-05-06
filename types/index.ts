@@ -183,7 +183,7 @@ export interface GradeDiff {
 
 // ========== Project Types ==========
 
-export type FileGroup = 'canvas' | 'registrar' | 'score';
+export type FileGroup = 'canvas' | 'registrar' | 'score' | 'edpuzzle' | 'master';
 
 export interface Project {
   id: string;
@@ -218,6 +218,27 @@ export interface OutputFile {
   stats: Record<string, number>;
 }
 
+// ========== Grade Upload Types ==========
+
+export interface GradeUploadEntry {
+  sisUserId: string;
+  studentName: string;
+  currentScore: string | null;
+  newScore: string;
+  changeType: 'unchanged' | 'increased' | 'decreased' | 'new_score' | 'blank_to_score';
+}
+
+export type UploadMode = 'all' | 'selected' | 'missing-only' | 'changed';
+export type ChangeFilter = 'all-changed' | 'increased-only' | 'decreased-only';
+
+export interface GradeUploadResult {
+  sisUserId: string;
+  success: boolean;
+  previousScore: string | null;
+  newScore: string;
+  error?: string;
+}
+
 // ========== Edpuzzle Config Types ==========
 
 export interface EdpuzzleConfig {
@@ -225,7 +246,43 @@ export interface EdpuzzleConfig {
   totalClips: number;
   clipQuestions: number[];
   label: string;
+  playlistName?: string;
   savedAt: Timestamp;
+}
+
+// ========== Master Data Types ==========
+
+export interface MasterAssignment {
+  name: string;
+  id: string;
+  columnIndex: number;
+  pointsPossible: number | null;
+}
+
+export interface ParsedMasterData {
+  headers: string[];
+  pointsPossibleRow: string[];
+  rows: string[][];
+  assignments: MasterAssignment[];
+  studentMap: Map<string, number>;
+  regOnlyStudents: RegOnlyStudent[];
+  sourceInfo: { canvasFileId: string; registrarFileIds: string[] };
+}
+
+export interface RegOnlyStudent {
+  id: string;
+  name: string;
+  surname: string;
+  regStatus: string;
+  section: string;
+}
+
+export interface MasterDataStats {
+  totalStudents: number;
+  matchedCount: number;
+  canvasOnlyCount: number;
+  regOnlyCount: number;
+  assignmentCount: number;
 }
 
 // ========== Auth Types ==========

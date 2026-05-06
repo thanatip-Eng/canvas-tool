@@ -38,13 +38,21 @@ const FILE_GROUPS: FileGroupConfig[] = [
     description: 'ไฟล์คะแนนจากแหล่งอื่น (CSV/Excel)',
     hint: 'ไฟล์ CSV หรือ Excel ที่มีคอลัมน์ ID หรือ Email',
   },
+  {
+    group: 'edpuzzle',
+    title: 'Edpuzzle Export',
+    icon: '🎬',
+    description: 'ไฟล์คะแนน Edpuzzle playlist',
+    hint: 'ไฟล์ที่ export จาก Edpuzzle (CSV/XLSX)',
+    multiple: true,
+  },
 ];
 
 export default function ProjectFileManager() {
   const { files, uploadFile, deleteFile } = useProject();
   const { showToast, ToastContainer } = useToast();
   const [uploadingGroup, setUploadingGroup] = useState<FileGroup | null>(null);
-  const [expandedGroups, setExpandedGroups] = useState<Set<FileGroup>>(new Set(['canvas', 'registrar', 'score']));
+  const [expandedGroups, setExpandedGroups] = useState<Set<FileGroup>>(new Set(['canvas', 'registrar', 'score', 'edpuzzle']));
 
   const toggleGroup = useCallback((group: FileGroup) => {
     setExpandedGroups(prev => {
@@ -138,7 +146,7 @@ export default function ProjectFileManager() {
                     </div>
                   )}
                   <FileUploadZone
-                    multiple={cfg.group === 'registrar'}
+                    multiple={cfg.group === 'registrar' || cfg.group === 'edpuzzle'}
                     label={`อัพโหลด ${cfg.title}`}
                     hint={cfg.hint}
                     onFiles={(f) => handleUpload(cfg.group, f)}

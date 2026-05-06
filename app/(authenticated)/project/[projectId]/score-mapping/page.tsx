@@ -30,7 +30,7 @@ interface MappingResult {
 }
 
 export default function ScoreMappingPage() {
-  const { loadFileContent, saveOutput, getDefaultFile } = useProject();
+  const { loadFileContent, saveOutput } = useProject();
   const { showToast, ToastContainer } = useToast();
   const [currentStep, setCurrentStep] = useState(1);
 
@@ -98,14 +98,6 @@ export default function ScoreMappingPage() {
       setLoadingScore(false);
     }
   }, [loadFileContent, showToast]);
-
-  // Auto-load default files on first render
-  const handleAutoLoadCanvas = useCallback(() => {
-    const defaultFile = getDefaultFile('canvas');
-    if (defaultFile && !selectedCanvasFile) {
-      handleLoadCanvas(defaultFile);
-    }
-  }, [getDefaultFile, selectedCanvasFile, handleLoadCanvas]);
 
   // Perform matching
   const handleMatch = useCallback(() => {
@@ -234,11 +226,6 @@ export default function ScoreMappingPage() {
                 ถัดไป →
               </button>
             </div>
-          )}
-          {!canvasData && !loadingCanvas && getDefaultFile('canvas') && !selectedCanvasFile && (
-            <button onClick={handleAutoLoadCanvas} className="rounded-xl bg-[var(--color-accent)] px-6 py-2.5 font-semibold text-[var(--color-bg-primary)] transition hover:bg-[var(--color-accent-dark)]">
-              โหลดไฟล์ล่าสุดอัตโนมัติ
-            </button>
           )}
         </div>
 

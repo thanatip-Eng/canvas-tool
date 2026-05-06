@@ -34,7 +34,9 @@ export interface EdpuzzleStudent {
   progress: number;        // 0-100 (percentage)
   totalClips: number;      // N
   onTime: string;          // "Not turned in" or date text
+  timeTurnedIn: string;    // Raw "Time turned in" timestamp text (column 7)
   clipGrades: (number | null)[]; // Grade per clip (null = not attempted/no grade)
+  clipTimeTurnedIn: (string | null)[]; // Per-clip "Time turned in" (4th of 4 per-clip columns)
 }
 
 export interface EdpuzzleParsed {
@@ -70,6 +72,8 @@ export function parseEdpuzzleData(data: ParsedFile): EdpuzzleParsed {
   const totalGradeIdx = hLower.findIndex(h => h === 'total grade');
   const progressIdx = hLower.findIndex(h => h.includes('progress'));
   const onTimeIdx = hLower.findIndex(h => h.includes('on time'));
+  // "Time turned in" in fixed columns (not the per-clip ones)
+  const timeTurnedInIdx = hLower.findIndex((h, idx) => idx < EDPUZZLE_FIXED_COLS && h.includes('time turned in'));
 
   // Build clip metadata
   // Each clip has 4 columns starting at EDPUZZLE_FIXED_COLS + (clipIdx * 4)
@@ -97,12 +101,15 @@ export function parseEdpuzzleData(data: ParsedFile): EdpuzzleParsed {
     const totalGrade = (row[totalGradeIdx] || '').trim();
     const progressVal = parseFloat((row[progressIdx] || '0').trim()) || 0;
     const onTime = (row[onTimeIdx] || '').trim();
+    const timeTurnedIn = timeTurnedInIdx >= 0 ? (row[timeTurnedInIdx] || '').trim() : '';
 
-    // Extract per-clip grades
+    // Extract per-clip grades and per-clip "Time turned in"
     const clipGrades: (number | null)[] = [];
+    const clipTimeTurnedIn: (string | null)[] = [];
     for (let c = 0; c < totalClips; c++) {
-      const gradeColIdx = EDPUZZLE_FIXED_COLS + c * COLS_PER_CLIP;
-      const gradeStr = (row[gradeColIdx] || '').trim();
+      const clipStart = EDPUZZLE_FIXED_COLS + c * COLS_PER_CLIP;
+      // Column 0: Grade
+      const gradeStr = (row[clipStart] || '').trim();
       if (gradeStr === '' || gradeStr === '-') {
         clipGrades.push(null);
       } else {
@@ -112,6 +119,9 @@ export function parseEdpuzzleData(data: ParsedFile): EdpuzzleParsed {
           clips[c].hasGrades = true;
         }
       }
+      // Column 3: Time turned in
+      const timeStr = (row[clipStart + 3] || '').trim();
+      clipTimeTurnedIn.push(timeStr && timeStr !== '-' ? timeStr : null);
     }
 
     students.push({
@@ -122,7 +132,9 @@ export function parseEdpuzzleData(data: ParsedFile): EdpuzzleParsed {
       progress: progressVal,
       totalClips,
       onTime,
+      timeTurnedIn,
       clipGrades,
+      clipTimeTurnedIn,
     });
   }
 
@@ -183,64 +195,51 @@ export function countCompletedClips(clipGrades: (number | null)[]): number {
 // ========== File Parsing Helper ==========
 
 /**
- * Parse an Edpuzzle file (which may have a broken extension or no extension).
+ * Parse an Edpuzzle file from a pre-read ArrayBuffer.
  * Tries CSV parsing first, then falls back to XLSX.
+ * Use this when the buffer has already been read (to avoid stale File references).
  */
-export function parseEdpuzzleFile(file: File): Promise<ParsedFile> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+export async function parseEdpuzzleFileFromBuffer(buffer: ArrayBuffer): Promise<ParsedFile> {
+  const text = new TextDecoder('utf-8').decode(buffer);
 
-    // Try reading as text first (CSV)
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      // Check if it looks like CSV (has quotes and commas)
-      if (text && (text.startsWith('"') || text.startsWith('\uFEFF"') || text.includes('","'))) {
-        // Parse as CSV
-        const cleanText = text.replace(/^\uFEFF/, ''); // Remove BOM if present
-        const lines = cleanText.split(/\r?\n/).map(line => {
-          const result: string[] = [];
-          let cell = '';
-          let inQuotes = false;
-          for (const ch of line) {
-            if (ch === '"') {
-              inQuotes = !inQuotes;
-            } else if (ch === ',' && !inQuotes) {
-              result.push(cell.trim());
-              cell = '';
-            } else {
-              cell += ch;
-            }
-          }
+  // Try CSV first (has quotes and commas)
+  if (text && (text.startsWith('"') || text.startsWith('\uFEFF"') || text.includes('","'))) {
+    const cleanText = text.replace(/^\uFEFF/, ''); // Remove BOM if present
+    const lines = cleanText.split(/\r?\n/).map(line => {
+      const result: string[] = [];
+      let cell = '';
+      let inQuotes = false;
+      for (const ch of line) {
+        if (ch === '"') {
+          inQuotes = !inQuotes;
+        } else if (ch === ',' && !inQuotes) {
           result.push(cell.trim());
-          return result;
-        });
-        resolve({
-          headers: lines[0] || [],
-          rows: lines.slice(1).filter(r => r.some(c => c)),
-        });
-      } else {
-        // Try as XLSX
-        const xlsxReader = new FileReader();
-        xlsxReader.onload = async (xe) => {
-          try {
-            const XLSX = await import('xlsx');
-            const data = new Uint8Array(xe.target?.result as ArrayBuffer);
-            const wb = XLSX.read(data, { type: 'array' });
-            const sheet = wb.Sheets[wb.SheetNames[0]];
-            const json: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-            resolve({
-              headers: (json[0] || []).map(h => h?.toString() || ''),
-              rows: json.slice(1).map(r => r.map(c => c?.toString() || '')),
-            });
-          } catch {
-            reject(new Error('ไม่สามารถอ่านไฟล์ Edpuzzle ได้ — รูปแบบไฟล์ไม่ถูกต้อง'));
-          }
-        };
-        xlsxReader.onerror = () => reject(xlsxReader.error);
-        xlsxReader.readAsArrayBuffer(file);
+          cell = '';
+        } else {
+          cell += ch;
+        }
       }
+      result.push(cell.trim());
+      return result;
+    });
+    return {
+      headers: lines[0] || [],
+      rows: lines.slice(1).filter(r => r.some(c => c)),
     };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(file, 'UTF-8');
-  });
+  }
+
+  // Fallback: XLSX from the same buffer
+  try {
+    const XLSX = await import('xlsx');
+    const data = new Uint8Array(buffer);
+    const wb = XLSX.read(data, { type: 'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const json: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    return {
+      headers: (json[0] || []).map(h => h?.toString() || ''),
+      rows: json.slice(1).map(r => r.map(c => c?.toString() || '')),
+    };
+  } catch {
+    throw new Error('ไม่สามารถอ่านไฟล์ Edpuzzle ได้ — รูปแบบไฟล์ไม่ถูกต้อง');
+  }
 }

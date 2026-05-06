@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useProject } from '@/contexts/ProjectContext';
 import { useToast } from '@/components/ui/Toast';
 import DataTable from '@/components/ui/DataTable';
@@ -13,7 +14,14 @@ const FEATURE_LABELS: Record<string, { label: string; icon: string }> = {
   'group-export': { label: 'ส่งออกกลุ่ม', icon: '👥' },
   'response-export': { label: 'ส่งออกคำตอบ', icon: '📝' },
   'edpuzzle-analysis': { label: 'Edpuzzle', icon: '🎬' },
+  'auto-grade': { label: 'ให้คะแนนอัตโนมัติ', icon: '⚡' },
+  'grade-backup': { label: 'สำรองคะแนน', icon: '💾' },
+  'grade-upload-log': { label: 'บันทึกอัปโหลด', icon: '📋' },
 };
+
+const UPLOADABLE_TYPES = new Set([
+  'score-mapping', 'edpuzzle-analysis', 'auto-grade', 'grade-compare', 'grade-backup',
+]);
 
 function formatDate(timestamp: { seconds: number } | Date): string {
   const date = timestamp instanceof Date
@@ -41,8 +49,9 @@ interface ViewerData {
 }
 
 export default function OutputHistory() {
-  const { outputs, deleteOutput, downloadOutput, loadOutputContent } = useProject();
+  const { outputs, deleteOutput, downloadOutput, loadOutputContent, project } = useProject();
   const { showToast, ToastContainer } = useToast();
+  const router = useRouter();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -139,6 +148,19 @@ export default function OutputHistory() {
 
                 {/* Actions */}
                 <div className="flex items-center gap-1 shrink-0">
+                  {/* Upload to Canvas */}
+                  {UPLOADABLE_TYPES.has(output.featureType) && project && (
+                    <button
+                      onClick={() => router.push(`/project/${project.id}/grade-upload?outputId=${output.id}`)}
+                      className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-white/10 hover:text-[var(--color-accent)] transition"
+                      title="อัปโหลดเข้า Canvas"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                    </button>
+                  )}
+
                   {/* View */}
                   <button
                     onClick={() => handleView(output)}

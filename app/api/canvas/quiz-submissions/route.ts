@@ -1,61 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth, getCanvasCreds, toErrorResponse } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams;
-  const apiKey = searchParams.get('apiKey');
-  const canvasUrl = searchParams.get('canvasUrl');
-  const courseId = searchParams.get('courseId');
-  const quizId = searchParams.get('quizId');
-
-  if (!apiKey || !canvasUrl || !courseId || !quizId) {
-    return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
-  }
-
   try {
-    // First get quiz questions
+    const { uid } = await requireAuth(request);
+    const { apiKey, canvasUrl } = await getCanvasCreds(uid);
+
+    const courseId = request.nextUrl.searchParams.get('courseId');
+    const quizId = request.nextUrl.searchParams.get('quizId');
+    if (!courseId || !quizId) {
+      return NextResponse.json({ error: 'courseId and quizId are required' }, { status: 400 });
+    }
+
+    const headers = {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    };
+
     const questionsRes: Response = await fetch(
       `${canvasUrl}/api/v1/courses/${courseId}/quizzes/${quizId}/questions?per_page=100`,
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
+      { headers }
     );
 
     let questions: any[] = [];
     if (questionsRes.ok) {
       questions = await questionsRes.json();
-      console.log(`Found ${questions.length} questions for quiz ${quizId}`);
-    } else {
-      console.log('Could not fetch questions:', questionsRes.status);
     }
 
-    // Get quiz submissions with submission history
     const allSubmissions: any[] = [];
     let nextUrl: string | null = `${canvasUrl}/api/v1/courses/${courseId}/quizzes/${quizId}/submissions?include[]=submission&include[]=submission_history&per_page=100`;
-    
+
     while (nextUrl) {
-      const response: Response = await fetch(nextUrl, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response: Response = await fetch(nextUrl, { headers });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Quiz submissions error:', response.status, errorText);
-        return NextResponse.json({ 
+        return NextResponse.json({
           submissions: [],
-          questions: questions,
-          error: `Canvas API Error: ${response.status}` 
+          questions,
+          error: `Canvas API Error: ${response.status} - ${errorText}`,
         });
       }
 
       const data = await response.json();
-      console.log('Quiz submissions response keys:', Object.keys(data));
-      
       if (data.quiz_submissions) {
         allSubmissions.push(...data.quiz_submissions);
       }
@@ -63,26 +50,16 @@ export async function GET(request: NextRequest) {
       const linkHeader = response.headers.get('Link');
       nextUrl = null;
       if (linkHeader) {
-        const links = linkHeader.split(',');
-        const nextLink = links.find((link: string) => link.includes('rel="next"'));
-        if (nextLink) {
-          const match = nextLink.match(/<([^>]+)>/);
-          if (match) {
-            nextUrl = match[1];
-          }
-        }
+        const nextLink = linkHeader.split(',').find((l) => l.includes('rel="next"'));
+        const match = nextLink?.match(/<([^>]+)>/);
+        if (match) nextUrl = match[1];
       }
     }
 
-    console.log(`Found ${allSubmissions.length} quiz submissions`);
-
-    // For each submission, try to get the submission events/answers
     const submissionsWithAnswers: any[] = [];
-    
     for (const submission of allSubmissions) {
       let answers: any[] = [];
-      
-      // Try to get answers from submission_history first
+
       if (submission.submission_history && submission.submission_history.length > 0) {
         const lastAttempt = submission.submission_history[submission.submission_history.length - 1];
         if (lastAttempt.submission_data) {
@@ -90,44 +67,26 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // If no answers from history, try the questions endpoint
       if (answers.length === 0) {
         try {
           const answersRes: Response = await fetch(
             `${canvasUrl}/api/v1/quiz_submissions/${submission.id}/questions`,
-            {
-              headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-              },
-            }
+            { headers }
           );
-
           if (answersRes.ok) {
             const answersData = await answersRes.json();
             answers = answersData.quiz_submission_questions || [];
           }
-        } catch (err) {
-          console.log('Could not fetch submission questions:', err);
+        } catch {
+          // Non-critical
         }
       }
 
-      submissionsWithAnswers.push({
-        ...submission,
-        answers: answers
-      });
+      submissionsWithAnswers.push({ ...submission, answers });
     }
 
-    return NextResponse.json({ 
-      submissions: submissionsWithAnswers,
-      questions: questions
-    });
-  } catch (error) {
-    console.error('Error fetching quiz submissions:', error);
-    return NextResponse.json({ 
-      submissions: [],
-      questions: [],
-      error: 'Failed to fetch quiz submissions' 
-    });
+    return NextResponse.json({ submissions: submissionsWithAnswers, questions });
+  } catch (err) {
+    return toErrorResponse(err);
   }
 }

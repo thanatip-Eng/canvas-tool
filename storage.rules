@@ -1,0 +1,39 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Project files (canvas/registrar/score/edpuzzle/master groups).
+    // Cap at 50 MB and restrict to the spreadsheet/PDF/image types this app handles.
+    match /users/{userId}/projects/{projectId}/files/{group}/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId)
+        && request.resource.size < 50 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('text/csv.*')
+          || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.*')
+          || request.resource.contentType.matches('application/vnd.ms-excel')
+          || request.resource.contentType.matches('application/pdf')
+          || request.resource.contentType.matches('image/(jpeg|png)')
+          || request.resource.contentType.matches('application/octet-stream')
+        );
+    }
+
+    // Generated output XLSX files. Only the server should write these in the long run,
+    // but today the client uploads them via the storage proxy, so we keep write open to the owner.
+    match /users/{userId}/projects/{projectId}/outputs/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId)
+        && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    // Default deny.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

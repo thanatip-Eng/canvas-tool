@@ -1,16 +1,7 @@
 import { ref, deleteObject } from 'firebase/storage';
-import { getFirebaseStorage, getFirebaseAuth } from './firebase';
+import { getFirebaseStorage } from './firebase';
+import { apiFetch } from './api-client';
 import type { FileGroup } from '@/types';
-
-/**
- * Get the current user's Firebase Auth ID token.
- */
-async function getAuthToken(): Promise<string> {
-  const auth = getFirebaseAuth();
-  const user = auth.currentUser;
-  if (!user) throw new Error('Not authenticated');
-  return user.getIdToken();
-}
 
 /**
  * Build the Firebase Storage path for a project file.
@@ -45,14 +36,11 @@ export async function uploadFileToStorage(
   storagePath: string,
   file: File | Blob
 ): Promise<{ storagePath: string; fileSize: number }> {
-  const token = await getAuthToken();
-
   const formData = new FormData();
   formData.append('file', file);
   formData.append('storagePath', storagePath);
-  formData.append('token', token);
 
-  const response = await fetch('/api/storage/upload', {
+  const response = await apiFetch('/api/storage/upload', {
     method: 'POST',
     body: formData,
   });
@@ -70,12 +58,10 @@ export async function uploadFileToStorage(
  * Routes through Next.js API to avoid CORS issues on localhost.
  */
 export async function downloadFileFromStorage(storagePath: string): Promise<Blob> {
-  const token = await getAuthToken();
-
-  const response = await fetch('/api/storage/download', {
+  const response = await apiFetch('/api/storage/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ storagePath, token }),
+    body: JSON.stringify({ storagePath }),
   });
 
   if (!response.ok) {

@@ -13,10 +13,14 @@ import {
   loadFileContent as loadFileContentSvc,
   downloadOutputFile,
   saveEdpuzzleConfig as saveEdpuzzleConfigSvc,
+  saveEdpuzzleConfigs as saveEdpuzzleConfigsSvc,
   loadEdpuzzleConfig as loadEdpuzzleConfigSvc,
+  loadAllEdpuzzleConfigs as loadAllEdpuzzleConfigsSvc,
+  deleteEdpuzzleConfig as deleteEdpuzzleConfigSvc,
 } from '@/lib/project-service';
 import { parseXlsxBlob } from '@/lib/xlsx-utils';
-import type { Project, ProjectFile, OutputFile, FileGroup, ParsedFile, EdpuzzleConfig } from '@/types';
+import { parseMasterDataBuffer } from '@/lib/master-data-utils';
+import type { Project, ProjectFile, OutputFile, FileGroup, ParsedFile, EdpuzzleConfig, ParsedMasterData } from '@/types';
 
 interface ProjectContextType {
   project: Project | null;
@@ -24,21 +28,26 @@ interface ProjectContextType {
     canvas: ProjectFile[];
     registrar: ProjectFile[];
     score: ProjectFile[];
+    edpuzzle: ProjectFile[];
+    master: ProjectFile[];
   };
   outputs: OutputFile[];
   loading: boolean;
   uploadFile: (group: FileGroup, file: File) => Promise<ProjectFile>;
   deleteFile: (fileId: string) => Promise<void>;
   loadFileContent: (file: ProjectFile) => Promise<ParsedFile>;
-  getDefaultFile: (group: FileGroup) => ProjectFile | null;
+  loadMasterData: () => Promise<ParsedMasterData | null>;
   saveOutput: (featureType: string, label: string, xlsxBuffer: Uint8Array, stats?: Record<string, number>) => Promise<OutputFile>;
   deleteOutput: (outputId: string) => Promise<void>;
   downloadOutput: (output: OutputFile) => Promise<void>;
   loadOutputContent: (output: OutputFile) => Promise<{ headers: string[]; rows: string[][] }>;
   refreshFiles: () => Promise<void>;
   refreshOutputs: () => Promise<void>;
-  saveEdpuzzleConfig: (config: { totalClips: number; clipQuestions: number[]; label: string }) => Promise<EdpuzzleConfig>;
+  saveEdpuzzleConfig: (config: { totalClips: number; clipQuestions: number[]; label: string; playlistName?: string }) => Promise<EdpuzzleConfig>;
+  saveEdpuzzleConfigs: (configs: Array<{ totalClips: number; clipQuestions: number[]; label: string; playlistName: string }>) => Promise<number>;
   loadEdpuzzleConfig: (totalClips: number) => Promise<EdpuzzleConfig | null>;
+  loadAllEdpuzzleConfigs: () => Promise<EdpuzzleConfig[]>;
+  deleteEdpuzzleConfig: (configId: string) => Promise<void>;
 }
 
 const ProjectContext = createContext<ProjectContextType | null>(null);
@@ -63,7 +72,10 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
     canvas: ProjectFile[];
     registrar: ProjectFile[];
     score: ProjectFile[];
-  }>({ canvas: [], registrar: [], score: [] });
+    edpuzzle: ProjectFile[];
+    master: ProjectFile[];
+  }>({ canvas: [], registrar: [], score: [], edpuzzle: [], master: [] });
+  const [masterDataCache, setMasterDataCache] = useState<ParsedMasterData | null>(null);
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -83,6 +95,8 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
         canvas: allFiles.filter((f) => f.group === 'canvas'),
         registrar: allFiles.filter((f) => f.group === 'registrar'),
         score: allFiles.filter((f) => f.group === 'score'),
+        edpuzzle: allFiles.filter((f) => f.group === 'edpuzzle'),
+        master: allFiles.filter((f) => f.group === 'master'),
       });
 
       // Load outputs
@@ -107,7 +121,10 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
       canvas: allFiles.filter((f) => f.group === 'canvas'),
       registrar: allFiles.filter((f) => f.group === 'registrar'),
       score: allFiles.filter((f) => f.group === 'score'),
+      edpuzzle: allFiles.filter((f) => f.group === 'edpuzzle'),
+      master: allFiles.filter((f) => f.group === 'master'),
     });
+    setMasterDataCache(null); // Invalidate cache when files refresh
   }, [userId, projectId]);
 
   // Refresh just outputs
@@ -137,11 +154,23 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
     return loadFileContentSvc(file.storagePath, file.originalFilename);
   }, []);
 
-  // Get default (most recent) file for a group
-  const getDefaultFile = useCallback((group: FileGroup): ProjectFile | null => {
-    const groupFiles = files[group];
-    return groupFiles.length > 0 ? groupFiles[0] : null; // Already sorted by uploadedAt desc
-  }, [files]);
+  // Load and cache master data from the latest master file
+  const loadMasterData = useCallback(async (): Promise<ParsedMasterData | null> => {
+    if (masterDataCache) return masterDataCache;
+    const masterFiles = files.master;
+    if (masterFiles.length === 0) return null;
+    try {
+      const latestFile = masterFiles[0]; // Already sorted by uploadedAt desc
+      const blob = await downloadOutputFile(latestFile.storagePath);
+      const buffer = new Uint8Array(await blob.arrayBuffer());
+      const parsed = parseMasterDataBuffer(buffer);
+      setMasterDataCache(parsed);
+      return parsed;
+    } catch (err) {
+      console.error('Error loading master data:', err);
+      return null;
+    }
+  }, [files.master, masterDataCache]);
 
   // Save output
   const saveOutputFn = useCallback(async (
@@ -182,16 +211,36 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
 
   // Save Edpuzzle config
   const saveEdpuzzleConfig = useCallback(async (
-    config: { totalClips: number; clipQuestions: number[]; label: string }
+    config: { totalClips: number; clipQuestions: number[]; label: string; playlistName?: string }
   ): Promise<EdpuzzleConfig> => {
     if (!userId) throw new Error('Not authenticated');
     return saveEdpuzzleConfigSvc(userId, projectId, config);
+  }, [userId, projectId]);
+
+  // Batch save multiple Edpuzzle configs
+  const saveEdpuzzleConfigs = useCallback(async (
+    configs: Array<{ totalClips: number; clipQuestions: number[]; label: string; playlistName: string }>
+  ): Promise<number> => {
+    if (!userId) throw new Error('Not authenticated');
+    return saveEdpuzzleConfigsSvc(userId, projectId, configs);
   }, [userId, projectId]);
 
   // Load Edpuzzle config
   const loadEdpuzzleConfig = useCallback(async (totalClips: number): Promise<EdpuzzleConfig | null> => {
     if (!userId) return null;
     return loadEdpuzzleConfigSvc(userId, projectId, totalClips);
+  }, [userId, projectId]);
+
+  // Load all Edpuzzle configs
+  const loadAllEdpuzzleConfigs = useCallback(async (): Promise<EdpuzzleConfig[]> => {
+    if (!userId) return [];
+    return loadAllEdpuzzleConfigsSvc(userId, projectId);
+  }, [userId, projectId]);
+
+  // Delete an Edpuzzle config
+  const deleteEdpuzzleConfig = useCallback(async (configId: string): Promise<void> => {
+    if (!userId) return;
+    await deleteEdpuzzleConfigSvc(userId, projectId, configId);
   }, [userId, projectId]);
 
   return (
@@ -204,7 +253,7 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
         uploadFile,
         deleteFile,
         loadFileContent,
-        getDefaultFile,
+        loadMasterData,
         saveOutput: saveOutputFn,
         deleteOutput: deleteOutputFn,
         downloadOutput,
@@ -212,7 +261,10 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
         refreshFiles,
         refreshOutputs,
         saveEdpuzzleConfig,
+        saveEdpuzzleConfigs,
         loadEdpuzzleConfig,
+        loadAllEdpuzzleConfigs,
+        deleteEdpuzzleConfig,
       }}
     >
       {children}
