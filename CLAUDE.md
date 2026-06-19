@@ -17,7 +17,13 @@ Path alias: `@/*` resolves to the repo root (e.g. `@/lib/foo`, `@/types`).
 
 ## Required environment
 
-`.env.local` must define all `NEXT_PUBLIC_FIREBASE_*` vars (see `.env.local.example`). Without them, Firebase init is skipped (`isFirebaseConfigured()` in `lib/firebase.ts`) and the login page shows a warning instead of crashing — this lazy init is intentional so static prerender works with missing env. The Canvas API key + Canvas base URL are NOT env vars — they are entered by the user at first login and persisted to Firestore at `users/{uid}`.
+`.env.local` must define:
+- `NEXT_PUBLIC_FIREBASE_*` — client Firebase config (see `.env.local.example`). Without them, Firebase init is skipped (`isFirebaseConfigured()` in `lib/firebase.ts`) and the login page shows a warning instead of crashing — this lazy init is intentional so static prerender works with missing env.
+- `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` — server-only Admin SDK creds (`lib/firebase-admin.ts`). The private key may be stored with literal `\n` (Vercel-style); it is restored at init.
+- `ALLOWED_EMAILS` *(optional)* — comma-separated allowlist used by `isEmailAllowed` in `lib/api-auth.ts`. Entries starting with `@` are domain matches (e.g. `@cmu.ac.th`). Unset = allow any authenticated user.
+- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` *(optional)* — enables per-uid sliding-window rate limit (100/min) in `lib/rate-limit.ts`. Unset = fail-open (warn in prod).
+
+The Canvas API key + Canvas base URL are NOT env vars — user enters them at first login and they persist to Firestore at `users/{uid}`. Server reads them via `getCanvasCreds(uid)`; the client never sends them in request bodies anymore.
 
 ## Architecture
 
@@ -26,7 +32,7 @@ Login is two-step (`app/page.tsx`):
 1. Google sign-in via Firebase Auth → populates `user`.
 2. User enters Canvas URL + Canvas API token → saved to `users/{uid}` doc and into `AuthContext` as `apiKey` + `canvasUrl`.
 
-`app/(authenticated)/layout.tsx` redirects to `/` if any of the three (`user`, `apiKey`, `canvasUrl`) is missing. Every Canvas API caller passes `apiKey` + `canvasUrl` through to `/api/canvas/*` routes — the server never reads them from env.
+`app/(authenticated)/layout.tsx` redirects to `/` if any of the three (`user`, `apiKey`, `canvasUrl`) is missing. The client keeps `apiKey`/`canvasUrl` in `AuthContext` only for UI gating — it never sends them to the server. Server routes get them from Firestore via `getCanvasCreds(uid)` after `requireAuth` verifies the Firebase ID token.
 
 ### Two routing groups
 - `app/(authenticated)/` — everything behind login. Top-level pages (`/courses`, `/dashboard`, `/grade-compare`, `/score-mapping`, `/status-check`, `/group-export`, `/response-export`) use the global `Navbar`.
@@ -54,10 +60,26 @@ users/{uid}/projects/{projectId}/outputs/{outputId}_{filename}
 Edpuzzle configs are stored as a **map field** on the project doc (`edpuzzleConfigs`), not a subcollection — this avoids extra Firestore rules. Keys are either `clips_{n}` or `pl_{playlistName}`.
 
 ### Storage proxy (CORS workaround)
-Browser uploads/downloads to Firebase Storage are blocked by CORS on localhost, so all reads/writes go through Next API routes (`app/api/storage/upload/route.ts`, `app/api/storage/download/route.ts`) which forward to the Firebase Storage REST API using the user's Firebase ID token. `lib/firebase-storage.ts` is the client wrapper. Direct client SDK use is reserved for `deleteObject` (which tolerates CORS failure since the Firestore metadata cleanup is what matters).
+Browser uploads/downloads to Firebase Storage are blocked by CORS on localhost, so all reads/writes go through Next API routes (`app/api/storage/upload/route.ts`, `app/api/storage/download/route.ts`). Each route runs `requireAuth` then `assertOwnsStoragePath(uid, storagePath)` before forwarding to the Firebase Storage REST API. `lib/firebase-storage.ts` is the client wrapper (uses `apiPostForm`/`apiGet`). Direct client SDK use is reserved for `deleteObject` (which tolerates CORS failure since the Firestore metadata cleanup is what matters).
+
+### API auth helpers (`lib/api-auth.ts` + `lib/api-client.ts`)
+Every protected route starts the same way:
+```ts
+const { uid } = await requireAuth(request);
+const { apiKey, canvasUrl } = await getCanvasCreds(uid); // canvas routes only
+```
+`requireAuth` verifies the `Authorization: Bearer <ID token>` header, checks `ALLOWED_EMAILS`, and runs the per-uid rate limit. It throws `ApiError(message, status)`; wrap the route body in `try/catch` and return `toErrorResponse(err)`. For storage routes also call `assertOwnsStoragePath(uid, path)` to block traversal.
+
+On the client, never call `fetch` directly against `/api/*`. Use the wrappers in `lib/api-client.ts`:
+- `apiGet<T>(path, params?)` — GET + parse JSON
+- `apiPostJson<T>(path, body)` — POST JSON body
+- `apiPostForm<T>(path, formData)` — POST multipart (file uploads)
+- `apiFetch(path, init?)` — raw `Response` (streaming/blob)
+
+All four attach the Firebase ID token automatically.
 
 ### Canvas API proxy
-All `app/api/canvas/*` routes follow a consistent shape: read `apiKey`, `canvasUrl`, and resource IDs from query string, fetch with `Authorization: Bearer ${apiKey}`, and **always paginate via the `Link` header `rel="next"`** (use the `parseLinkNext` helper pattern). The `/api/canvas/auto-grade` route is a batch endpoint that fans out submissions+rubrics+late-policy+quiz-questions in groups of 5 and normalizes Classic vs New Quiz schemas — preserve this shape when extending.
+All `app/api/canvas/*` routes share this shape: `requireAuth` → `getCanvasCreds(uid)` → take only **resource IDs** from query string (never the API key) → fetch Canvas with `Authorization: Bearer ${apiKey}` → **paginate via the `Link` header `rel="next"`**. The `/api/canvas/auto-grade` route is a batch endpoint that fans out submissions+rubrics+late-policy+quiz-questions in groups of 5 and normalizes Classic vs New Quiz schemas — preserve this shape when extending. `/api/canvas/grade-upload` enforces a body size cap.
 
 ### Canvas data parsing conventions (`lib/constants.ts`)
 - `CANVAS_FIXED_COLS = 6` — Canvas exports always start with 6 fixed identity columns; assignment columns begin at index 6.
