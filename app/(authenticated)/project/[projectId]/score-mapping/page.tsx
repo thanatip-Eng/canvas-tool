@@ -11,7 +11,13 @@ import { buildXlsx, downloadXlsx } from '@/lib/xlsx-utils';
 import { validateCanvasFile, extractAssignments } from '@/lib/canvas-utils';
 import { performStudentMatching } from '@/lib/student-matching';
 import { CANVAS_FIXED_COLS, STATUS } from '@/lib/constants';
-import type { ParsedFile, AssignmentInfo, MappingResultEntry, ProjectFile } from '@/types';
+import type { ParsedFile, AssignmentInfo, MappingResultEntry, ExternalOrphan, ProjectFile } from '@/types';
+
+const UNMATCH_REASON_LABEL: Record<string, string> = {
+  'external-missing': 'ไม่พบในไฟล์ภายนอก',
+  'external-blank': 'คอลัมน์คะแนนว่าง',
+  'external-nonnumeric': 'คะแนนไม่ใช่ตัวเลข',
+};
 
 const STEPS = [
   { label: 'เลือกไฟล์ Canvas' },
@@ -22,11 +28,14 @@ const STEPS = [
 
 interface MappingResult {
   results: MappingResultEntry[];
+  orphans: ExternalOrphan[];
   assignmentIdx: number;
   totalMatched: number;
   totalNotFound: number;
   totalHadScore: number;
   totalOverwritten: number;
+  totalBlankScore: number;
+  totalNonNumeric: number;
 }
 
 export default function ScoreMappingPage() {
@@ -106,13 +115,15 @@ export default function ScoreMappingPage() {
       return;
     }
     const assignment = assignments[selectedAssignment];
-    const results = performStudentMatching(canvasData, scoreData, assignment.index, mappingMode, scoreColIdx, attendScore);
+    const { entries: results, orphans } = performStudentMatching(canvasData, scoreData, assignment.index, mappingMode, scoreColIdx, attendScore);
     const totalMatched = results.filter(r => r.status === STATUS.MATCHED).length;
     const totalNotFound = results.filter(r => r.status === STATUS.NOT_FOUND).length;
     const totalHadScore = results.filter(r => r.canvasScore).length;
     const totalOverwritten = results.filter(r => r.status === STATUS.MATCHED && r.canvasScore && r.matchedScore !== r.canvasScore).length;
-    setMappingResult({ results, assignmentIdx: assignment.index, totalMatched, totalNotFound, totalHadScore, totalOverwritten });
-    showToast(`จับคู่สำเร็จ: ${totalMatched} คน, ไม่พบ: ${totalNotFound} คน`, 'success');
+    const totalBlankScore = results.filter(r => r.unmatchReason === 'external-blank').length;
+    const totalNonNumeric = results.filter(r => r.unmatchReason === 'external-nonnumeric').length;
+    setMappingResult({ results, orphans, assignmentIdx: assignment.index, totalMatched, totalNotFound, totalHadScore, totalOverwritten, totalBlankScore, totalNonNumeric });
+    showToast(`จับคู่สำเร็จ: ${totalMatched} คน, ไม่พบ: ${totalNotFound} คน, ในไฟล์ภายนอกไม่พบใน Canvas: ${orphans.length} แถว`, 'success');
     setCurrentStep(4);
   }, [canvasData, scoreData, selectedAssignment, assignments, mappingMode, scoreColIdx, attendScore, showToast]);
 
@@ -137,13 +148,14 @@ export default function ScoreMappingPage() {
   const buildDetailedXlsxBuffer = useCallback((): Uint8Array | null => {
     if (!mappingResult || !canvasData) return null;
     const assignmentName = canvasData.headers[mappingResult.assignmentIdx];
-    const headers = ['ชื่อ', 'ID', 'สถานะ', `คะแนนเดิม (Canvas)`, `คะแนนใหม่ - ${assignmentName}`, 'เปลี่ยนแปลง', 'จับคู่โดย'];
+    const headers = ['ชื่อ', 'ID', 'สถานะ', `คะแนนเดิม (Canvas)`, `คะแนนใหม่ - ${assignmentName}`, 'เปลี่ยนแปลง', 'จับคู่โดย', 'เหตุผลที่ไม่ผ่าน'];
     const rows = mappingResult.results.map(r => {
       const oldScore = r.canvasScore || '';
       const newScore = r.matchedScore ?? '';
       const hasChange = r.status === STATUS.MATCHED && oldScore !== newScore;
       const changeLabel = r.status !== STATUS.MATCHED ? '-' : !oldScore && newScore ? 'ใหม่' : hasChange ? 'เปลี่ยน' : 'เท่าเดิม';
-      return [r.canvasName, r.canvasId, r.status === STATUS.MATCHED ? 'สำเร็จ' : 'ไม่พบ', oldScore || '-', r.status === STATUS.MATCHED ? newScore : '-', changeLabel, r.matchedBy || '-'];
+      const reason = r.unmatchReason ? (UNMATCH_REASON_LABEL[r.unmatchReason] || r.unmatchReason) : '-';
+      return [r.canvasName, r.canvasId, r.status === STATUS.MATCHED ? 'สำเร็จ' : 'ไม่พบ', oldScore || '-', r.status === STATUS.MATCHED ? newScore : '-', changeLabel, r.matchedBy || '-', reason];
     });
     return buildXlsx(headers, rows, 'Map คะแนน');
   }, [mappingResult, canvasData]);
@@ -168,6 +180,9 @@ export default function ScoreMappingPage() {
         notFound: mappingResult.totalNotFound,
         hadScore: mappingResult.totalHadScore,
         overwritten: mappingResult.totalOverwritten,
+        blankScore: mappingResult.totalBlankScore,
+        nonNumeric: mappingResult.totalNonNumeric,
+        externalOrphans: mappingResult.orphans.length,
       });
       showToast('บันทึกผลลัพธ์ไปโปรเจคสำเร็จ', 'success');
     } catch {
@@ -318,15 +333,18 @@ export default function ScoreMappingPage() {
                 </button>
                 <button onClick={handleReset} className="rounded-xl bg-white/5 px-6 py-2.5 text-[var(--color-text-muted)] transition hover:bg-white/10">🔄 เริ่มใหม่</button>
               </div>
-              <div className="grid gap-4 sm:grid-cols-5">
+              <div className="grid gap-4 sm:grid-cols-4 lg:grid-cols-8">
                 <StatCard icon="👥" label="นักศึกษาทั้งหมด" value={mappingResult.results.length} />
                 <StatCard icon="✅" label="จับคู่สำเร็จ" value={mappingResult.totalMatched} color="text-[var(--color-success)]" />
-                <StatCard icon="❌" label="ไม่พบ" value={mappingResult.totalNotFound} color="text-[var(--color-danger)]" />
+                <StatCard icon="❌" label="ไม่พบในไฟล์ภายนอก" value={mappingResult.totalNotFound - mappingResult.totalBlankScore - mappingResult.totalNonNumeric} color="text-[var(--color-danger)]" />
+                <StatCard icon="⬜" label="คะแนนว่าง" value={mappingResult.totalBlankScore} color="text-[var(--color-warning)]" />
+                <StatCard icon="🔤" label="คะแนนไม่ใช่ตัวเลข" value={mappingResult.totalNonNumeric} color="text-[var(--color-warning)]" />
+                <StatCard icon="👤" label="ในไฟล์ภายนอก ไม่มีใน Canvas" value={mappingResult.orphans.length} color="text-[var(--color-info)]" />
                 <StatCard icon="📋" label="มีคะแนนเดิม" value={mappingResult.totalHadScore} color="text-[var(--color-info)]" />
                 <StatCard icon="🔄" label="เปลี่ยนแปลง" value={mappingResult.totalOverwritten} color="text-[var(--color-warning)]" />
               </div>
               <DataTable
-                headers={['ชื่อ', 'ID', 'สถานะ', 'คะแนนเดิม (Canvas)', 'คะแนนใหม่', 'เปลี่ยนแปลง', 'จับคู่โดย']}
+                headers={['ชื่อ', 'ID', 'สถานะ', 'คะแนนเดิม (Canvas)', 'คะแนนใหม่', 'เปลี่ยนแปลง', 'จับคู่โดย', 'เหตุผลที่ไม่ผ่าน']}
                 rows={mappingResult.results.map(r => {
                   const oldScore = r.canvasScore || '';
                   const newScore = r.matchedScore ?? '';
@@ -345,6 +363,9 @@ export default function ScoreMappingPage() {
                       : hasChange
                         ? 'text-[var(--color-warning)]'
                         : 'text-[var(--color-text-muted)]';
+                  const reasonLabel = r.unmatchReason
+                    ? UNMATCH_REASON_LABEL[r.unmatchReason] || r.unmatchReason
+                    : '';
                   return [
                     r.canvasName,
                     r.canvasId,
@@ -353,11 +374,39 @@ export default function ScoreMappingPage() {
                     r.status === STATUS.MATCHED ? newScore : <span key="no-match" className="text-[var(--color-text-muted)]">-</span>,
                     <span key="change" className={changeColor}>{changeLabel}</span>,
                     r.matchedBy || '-',
+                    reasonLabel
+                      ? <span key="reason" className="text-[var(--color-warning)]">{reasonLabel}</span>
+                      : <span key="reason-empty" className="text-[var(--color-text-muted)]">-</span>,
                   ];
                 })}
                 paginate
                 filterable
               />
+
+              {/* Orphan external rows (not found in Canvas) */}
+              {mappingResult.orphans.length > 0 && (
+                <div className="glass-card p-4 space-y-3">
+                  <div>
+                    <h3 className="font-semibold text-[var(--color-text-primary)]">
+                      แถวในไฟล์ภายนอกที่ไม่พบใน Canvas ({mappingResult.orphans.length})
+                    </h3>
+                    <p className="text-sm text-[var(--color-text-muted)]">
+                      แถวเหล่านี้มี email/ID แต่ไม่มีนักศึกษาที่ตรงกันในไฟล์ Canvas — ตรวจสอบว่าใช้ email ที่ถูก หรือ นักศึกษาเพิ่งถอน
+                    </p>
+                  </div>
+                  <DataTable
+                    headers={['#', 'Email', 'ID', 'คะแนน']}
+                    rows={mappingResult.orphans.map(o => [
+                      String(o.externalRowIndex + 1),
+                      o.email || <span key="e" className="text-[var(--color-text-muted)]">-</span>,
+                      o.id || <span key="i" className="text-[var(--color-text-muted)]">-</span>,
+                      o.score || <span key="s" className="text-[var(--color-text-muted)]">-</span>,
+                    ])}
+                    paginate
+                    filterable
+                  />
+                </div>
+              )}
             </>
           )}
         </div>

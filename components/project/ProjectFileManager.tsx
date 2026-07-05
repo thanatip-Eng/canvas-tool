@@ -46,13 +46,21 @@ const FILE_GROUPS: FileGroupConfig[] = [
     hint: 'ไฟล์ที่ export จาก Edpuzzle (CSV/XLSX)',
     multiple: true,
   },
+  {
+    group: 'attendance',
+    title: 'MS Form เช็คชื่อ',
+    icon: '📝',
+    description: 'ไฟล์ Excel จาก MS Form (check-in / check-out)',
+    hint: 'อัพโหลดไฟล์ที่ export จาก Microsoft Forms — คู่ check-in และ check-out',
+    multiple: true,
+  },
 ];
 
 export default function ProjectFileManager() {
   const { files, uploadFile, deleteFile } = useProject();
   const { showToast, ToastContainer } = useToast();
   const [uploadingGroup, setUploadingGroup] = useState<FileGroup | null>(null);
-  const [expandedGroups, setExpandedGroups] = useState<Set<FileGroup>>(new Set(['canvas', 'registrar', 'score', 'edpuzzle']));
+  const [expandedGroups, setExpandedGroups] = useState<Set<FileGroup>>(new Set(['canvas', 'registrar', 'score', 'edpuzzle', 'attendance']));
 
   const toggleGroup = useCallback((group: FileGroup) => {
     setExpandedGroups(prev => {
@@ -146,7 +154,7 @@ export default function ProjectFileManager() {
                     </div>
                   )}
                   <FileUploadZone
-                    multiple={cfg.group === 'registrar' || cfg.group === 'edpuzzle'}
+                    multiple={cfg.group === 'registrar' || cfg.group === 'edpuzzle' || cfg.group === 'attendance'}
                     label={`อัพโหลด ${cfg.title}`}
                     hint={cfg.hint}
                     onFiles={(f) => handleUpload(cfg.group, f)}

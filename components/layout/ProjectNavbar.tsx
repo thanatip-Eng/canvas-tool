@@ -14,6 +14,7 @@ const FEATURE_ITEMS = [
   { slug: '/grade-export', label: 'ส่งออกเกรด', icon: '📤' },
   { slug: '/obe-mapping', label: 'CMU OBE', icon: '🎓' },
   { slug: '/auto-grade', label: 'ให้คะแนนอัตโนมัติ', icon: '⚡' },
+  { slug: '/attendance', label: 'เช็คชื่อ MS Form', icon: '📝' },
   { slug: '/grade-upload', label: 'อัปโหลดคะแนน', icon: '⬆️' },
 ];
 

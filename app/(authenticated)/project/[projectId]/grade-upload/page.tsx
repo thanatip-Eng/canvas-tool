@@ -33,7 +33,7 @@ const STEPS = [
 ];
 
 const UPLOADABLE_TYPES = new Set([
-  'score-mapping', 'edpuzzle-analysis', 'auto-grade', 'grade-compare', 'grade-backup',
+  'score-mapping', 'edpuzzle-analysis', 'auto-grade', 'grade-compare', 'grade-backup', 'attendance',
 ]);
 
 interface CanvasAssignment {
@@ -376,6 +376,7 @@ export default function GradeUploadPage() {
       'auto-grade': 'ให้คะแนนอัตโนมัติ',
       'grade-compare': 'เปรียบเทียบคะแนน',
       'grade-backup': 'สำรองคะแนน',
+      'attendance': 'เช็คชื่อ MS Form',
     };
     return map[ft] || ft;
   };
@@ -387,6 +388,7 @@ export default function GradeUploadPage() {
       'auto-grade': '⚡',
       'grade-compare': '📈',
       'grade-backup': '💾',
+      'attendance': '📝',
     };
     return map[ft] || '📄';
   };

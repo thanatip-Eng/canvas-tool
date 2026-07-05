@@ -30,6 +30,7 @@ interface ProjectContextType {
     score: ProjectFile[];
     edpuzzle: ProjectFile[];
     master: ProjectFile[];
+    attendance: ProjectFile[];
   };
   outputs: OutputFile[];
   loading: boolean;
@@ -74,7 +75,8 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
     score: ProjectFile[];
     edpuzzle: ProjectFile[];
     master: ProjectFile[];
-  }>({ canvas: [], registrar: [], score: [], edpuzzle: [], master: [] });
+    attendance: ProjectFile[];
+  }>({ canvas: [], registrar: [], score: [], edpuzzle: [], master: [], attendance: [] });
   const [masterDataCache, setMasterDataCache] = useState<ParsedMasterData | null>(null);
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,6 +99,7 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
         score: allFiles.filter((f) => f.group === 'score'),
         edpuzzle: allFiles.filter((f) => f.group === 'edpuzzle'),
         master: allFiles.filter((f) => f.group === 'master'),
+        attendance: allFiles.filter((f) => f.group === 'attendance'),
       });
 
       // Load outputs
@@ -123,6 +126,7 @@ export function ProjectProvider({ projectId, children }: ProjectProviderProps) {
       score: allFiles.filter((f) => f.group === 'score'),
       edpuzzle: allFiles.filter((f) => f.group === 'edpuzzle'),
       master: allFiles.filter((f) => f.group === 'master'),
+      attendance: allFiles.filter((f) => f.group === 'attendance'),
     });
     setMasterDataCache(null); // Invalidate cache when files refresh
   }, [userId, projectId]);

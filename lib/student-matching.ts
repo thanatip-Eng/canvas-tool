@@ -1,4 +1,4 @@
-import { ParsedFile, ScoreColumns, MappingResultEntry } from '@/types';
+import { ParsedFile, ScoreColumns, MappingResultEntry, StudentMatchingResult, ExternalOrphan, UnmatchReason } from '@/types';
 import { STATUS } from '@/lib/constants';
 import { getPointsRowStart } from '@/lib/canvas-utils';
 
@@ -37,27 +37,33 @@ export function findScoreColumnIndices(headers: string[]): ScoreColumns {
 
 // ========== Score Lookup ==========
 
+interface ScoreLookupEntry {
+  row: string[];
+  externalRowIndex: number;
+}
+
 interface ScoreLookup {
-  emailMap: Map<string, string[]>;
-  idMap: Map<string, string[]>;
+  emailMap: Map<string, ScoreLookupEntry>;
+  idMap: Map<string, ScoreLookupEntry>;
 }
 
 /**
  * Build O(1) lookup maps from score file rows.
  * Creates two maps:
- * - emailMap: lowercase email -> row data
- * - idMap: student ID -> row data
+ * - emailMap: lowercase email -> row data + original index
+ * - idMap: student ID -> row data + original index
  * First occurrence wins (duplicates are ignored).
  */
 export function buildScoreLookup(scoreRows: string[][], scoreCols: ScoreColumns): ScoreLookup {
-  const emailMap = new Map<string, string[]>();
-  const idMap = new Map<string, string[]>();
+  const emailMap = new Map<string, ScoreLookupEntry>();
+  const idMap = new Map<string, ScoreLookupEntry>();
 
-  scoreRows.forEach((sRow) => {
+  scoreRows.forEach((sRow, externalRowIndex) => {
     const email = (sRow[scoreCols.emailIdx] || '').toLowerCase().trim();
     const id = (sRow[scoreCols.idIdx] || '').trim();
-    if (email && !emailMap.has(email)) emailMap.set(email, sRow);
-    if (id && !idMap.has(id)) idMap.set(id, sRow);
+    const entry: ScoreLookupEntry = { row: sRow, externalRowIndex };
+    if (email && !emailMap.has(email)) emailMap.set(email, entry);
+    if (id && !idMap.has(id)) idMap.set(id, entry);
   });
 
   return { emailMap, idMap };
@@ -84,46 +90,90 @@ export function performStudentMatching(
   mode: 'score' | 'attend',
   scoreColIdx: number,
   attendScore: string
-): MappingResultEntry[] {
+): StudentMatchingResult {
   const canvasCols = findCanvasColumnIndices(canvasData.headers);
   const scoreCols = findScoreColumnIndices(scoreData.headers);
-  const { emailMap, idMap } = buildScoreLookup(scoreData.rows, scoreCols);
+  const lookup = buildScoreLookup(scoreData.rows, scoreCols);
+  const { emailMap, idMap } = lookup;
+  const consumedRows = new Set<number>();
 
   const startRow = getPointsRowStart(canvasData.rows);
 
-  return canvasData.rows.slice(startRow).map((cRow, ri) => {
+  const entries: MappingResultEntry[] = canvasData.rows.slice(startRow).map((cRow, ri) => {
     const name = cRow[0] || '';
     const cId = (cRow[canvasCols.idIdx] || '').trim();
     const cSis = (cRow[canvasCols.sisIdx] || '').trim();
     const cEmail = (cRow[canvasCols.emailIdx] || '').toLowerCase().trim();
 
-    let newScore: string | null = null;
+    let matchedRow: string[] | null = null;
     let matchedBy = '';
 
     // Priority: Email > ID (O(1) lookup via Map)
     const emailMatch = cEmail ? emailMap.get(cEmail) : undefined;
     if (emailMatch) {
       matchedBy = 'email';
-      newScore = mode === 'score' ? (emailMatch[scoreColIdx] || '') : attendScore;
+      matchedRow = emailMatch.row;
+      consumedRows.add(emailMatch.externalRowIndex);
     } else {
       const idMatch = idMap.get(cId) || idMap.get(cSis);
       if (idMatch) {
         matchedBy = 'id';
-        newScore = mode === 'score' ? (idMatch[scoreColIdx] || '') : attendScore;
+        matchedRow = idMatch.row;
+        consumedRows.add(idMatch.externalRowIndex);
       }
     }
 
     const existingScore = (cRow[assignmentIdx] || '').trim();
-
-    return {
+    const base: MappingResultEntry = {
       rowIndex: ri + startRow,
       canvasName: name,
       canvasId: cId || cSis,
       canvasEmail: cRow[canvasCols.emailIdx] || '',
-      status: newScore !== null ? STATUS.MATCHED : STATUS.NOT_FOUND,
-      matchedScore: newScore ?? undefined,
-      matchedBy: matchedBy || undefined,
+      status: STATUS.NOT_FOUND,
       canvasScore: existingScore || undefined,
     };
+
+    if (!matchedRow) {
+      return { ...base, unmatchReason: 'external-missing' as UnmatchReason };
+    }
+
+    let newScore: string;
+    let unmatchReason: UnmatchReason | undefined;
+
+    if (mode === 'attend') {
+      newScore = attendScore;
+    } else {
+      const raw = (matchedRow[scoreColIdx] || '').trim();
+      if (raw === '') {
+        unmatchReason = 'external-blank';
+        newScore = '';
+      } else if (isNaN(parseFloat(raw))) {
+        unmatchReason = 'external-nonnumeric';
+        newScore = raw;
+      } else {
+        newScore = raw;
+      }
+    }
+
+    return {
+      ...base,
+      status: unmatchReason ? STATUS.NOT_FOUND : STATUS.MATCHED,
+      matchedScore: unmatchReason ? undefined : newScore,
+      matchedBy,
+      unmatchReason,
+    };
   });
+
+  // Compute orphans: external rows that were never consumed (and have some identifier)
+  const orphans: ExternalOrphan[] = [];
+  scoreData.rows.forEach((sRow, idx) => {
+    if (consumedRows.has(idx)) return;
+    const email = (sRow[scoreCols.emailIdx] || '').trim();
+    const id = (sRow[scoreCols.idIdx] || '').trim();
+    if (!email && !id) return; // skip rows with no identifier at all
+    const score = scoreColIdx >= 0 ? (sRow[scoreColIdx] || '').trim() : '';
+    orphans.push({ externalRowIndex: idx, email, id, score });
+  });
+
+  return { entries, orphans };
 }

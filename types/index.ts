@@ -21,6 +21,11 @@ export interface ScoreColumns {
   idIdx: number;
 }
 
+export type UnmatchReason =
+  | 'external-missing'      // Canvas student had no matching row in external file
+  | 'external-blank'        // matched row but the selected score column was empty
+  | 'external-nonnumeric';  // matched but score column contained non-numeric text
+
 export interface MappingResultEntry {
   rowIndex: number;
   canvasName: string;
@@ -30,6 +35,19 @@ export interface MappingResultEntry {
   matchedScore?: string;
   matchedBy?: string;
   canvasScore?: string;
+  unmatchReason?: UnmatchReason;
+}
+
+export interface ExternalOrphan {
+  externalRowIndex: number;
+  email: string;
+  id: string;
+  score: string;
+}
+
+export interface StudentMatchingResult {
+  entries: MappingResultEntry[];
+  orphans: ExternalOrphan[];
 }
 
 export interface MappingResult {
@@ -183,7 +201,7 @@ export interface GradeDiff {
 
 // ========== Project Types ==========
 
-export type FileGroup = 'canvas' | 'registrar' | 'score' | 'edpuzzle' | 'master';
+export type FileGroup = 'canvas' | 'registrar' | 'score' | 'edpuzzle' | 'master' | 'attendance';
 
 export interface Project {
   id: string;
