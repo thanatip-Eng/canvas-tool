@@ -4,6 +4,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
 import StepWizard from '@/components/ui/StepWizard';
 import FileSelector from '@/components/project/FileSelector';
+import SourceFilesSummary from '@/components/project/SourceFilesSummary';
 import DataTable from '@/components/ui/DataTable';
 import StatCard from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
@@ -480,6 +481,14 @@ export default function AttendancePage() {
         <div className="space-y-6">
           {results && stats && (
             <>
+              <SourceFilesSummary
+                files={[
+                  { label: 'Canvas', filename: canvasFile?.originalFilename },
+                  { label: 'Check-in', filename: checkInFile?.originalFilename },
+                  { label: 'Check-out', filename: checkOutFile?.originalFilename },
+                  { label: 'Assignment ปลายทาง', filename: selectedAssignmentIdx >= 0 ? assignments[selectedAssignmentIdx]?.name : undefined },
+                ]}
+              />
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1">
                   {(['xlsx', 'csv'] as const).map(fmt => (

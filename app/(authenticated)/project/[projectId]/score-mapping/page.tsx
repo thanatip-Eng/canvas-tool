@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
 import StepWizard from '@/components/ui/StepWizard';
 import FileSelector from '@/components/project/FileSelector';
+import SourceFilesSummary from '@/components/project/SourceFilesSummary';
 import DataTable from '@/components/ui/DataTable';
 import StatCard from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
@@ -332,6 +333,14 @@ export default function ScoreMappingPage() {
         <div className="space-y-6">
           {mappingResult && (
             <>
+              <SourceFilesSummary
+                files={[
+                  { label: 'Canvas', filename: selectedCanvasFile?.originalFilename },
+                  { label: 'ไฟล์คะแนน', filename: selectedScoreFile?.originalFilename },
+                  { label: 'คอลัมน์คะแนน', filename: mappingMode === 'score' && scoreData ? scoreData.headers[scoreColIdx] : (mappingMode === 'attend' ? `เช็คชื่อ (ให้ ${attendScore} คะแนน)` : undefined) },
+                  { label: 'Assignment ปลายทาง', filename: canvasData && mappingResult ? canvasData.headers[mappingResult.assignmentIdx] : undefined },
+                ]}
+              />
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1">
                   {(['xlsx', 'csv'] as const).map(fmt => (

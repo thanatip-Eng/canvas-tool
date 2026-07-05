@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
 import StepWizard from '@/components/ui/StepWizard';
 import FileSelector from '@/components/project/FileSelector';
+import SourceFilesSummary from '@/components/project/SourceFilesSummary';
 import DataTable from '@/components/ui/DataTable';
 import FilterTabs from '@/components/ui/FilterTabs';
 import StatCard from '@/components/ui/StatCard';
@@ -367,8 +368,17 @@ export default function StatusCheckPage() {
           {results && (() => {
             const filteredEntries = getFilteredEntries();
             const grouped = groupBySection(filteredEntries);
+            const selectedRegFiles = files.registrar.filter(f => selectedRegIds.has(f.id));
             return (
               <div className="space-y-6">
+                <SourceFilesSummary
+                  files={[
+                    { label: 'Canvas', filename: selectedCanvasFile?.originalFilename },
+                    ...(selectedRegFiles.length > 0
+                      ? selectedRegFiles.map((f, i) => ({ label: `ทะเบียน ${i + 1}`, filename: f.originalFilename }))
+                      : [{ label: 'ทะเบียน', filename: 'ไม่มี' }]),
+                  ]}
+                />
                 <div className="flex flex-wrap gap-3">
                   <button onClick={handleExport} className="btn btn-primary">📥 ดาวน์โหลด XLSX</button>
                   <button onClick={handleSaveToProject} disabled={saving} className="rounded-xl bg-[var(--color-accent)] px-6 py-2.5 font-semibold text-[var(--color-bg-primary)] transition hover:bg-[var(--color-accent-dark)] disabled:opacity-50">

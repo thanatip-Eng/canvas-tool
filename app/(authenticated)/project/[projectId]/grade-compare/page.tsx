@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import StepWizard from '@/components/ui/StepWizard';
 import FileSelector from '@/components/project/FileSelector';
+import SourceFilesSummary from '@/components/project/SourceFilesSummary';
 import StatCard from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
 import { buildXlsx, downloadXlsx } from '@/lib/xlsx-utils';
@@ -311,6 +312,13 @@ export default function GradeComparePage() {
 
         {/* Step 3: Diff view */}
         <div className="space-y-6">
+          <SourceFilesSummary
+            files={[
+              { label: 'Canvas ปัจจุบัน', filename: selectedFile?.originalFilename },
+              { label: 'Snapshot ก่อนหน้า', filename: latestSnapshot ? `บันทึกเมื่อ ${latestSnapshot.savedAt.toDate().toLocaleString('th-TH')}` : 'ไม่มี' },
+              { label: 'Assignment', filename: selectedAssignment || undefined },
+            ]}
+          />
           <div className="flex flex-wrap gap-3">
             <button onClick={handleExportCSV} className="rounded-xl bg-[var(--color-success)] px-5 py-2.5 font-semibold text-white transition hover:opacity-90">📥 ดาวน์โหลด XLSX</button>
             <button onClick={handleSaveSnapshot} className="rounded-xl bg-[var(--color-accent)] px-5 py-2.5 font-semibold text-[var(--color-bg-primary)] transition hover:bg-[var(--color-accent-dark)]">💾 บันทึก Snapshot</button>

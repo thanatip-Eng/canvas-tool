@@ -5,6 +5,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { apiGet } from '@/lib/api-client';
 import StepWizard from '@/components/ui/StepWizard';
 import FileSelector from '@/components/project/FileSelector';
+import SourceFilesSummary from '@/components/project/SourceFilesSummary';
 import DataTable from '@/components/ui/DataTable';
 import StatCard from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
@@ -1491,6 +1492,13 @@ export default function EdpuzzleAnalysisPage() {
           <div className="space-y-6">
             {results.length > 0 && (
               <>
+                <SourceFilesSummary
+                  files={[
+                    { label: 'Edpuzzle', filename: selectedEdpuzzleFile?.originalFilename },
+                    { label: 'Assignment (Canvas)', filename: selectedAssignment?.name },
+                    { label: 'Master Data assignment', filename: selectedMasterAssignment?.name },
+                  ]}
+                />
                 <div className="flex flex-wrap gap-3">
                   <button onClick={handleExport} className="btn btn-primary">📥 ดาวน์โหลด XLSX</button>
                   <button onClick={handleSaveToProject} disabled={saving} className="rounded-xl bg-[var(--color-accent)] px-6 py-2.5 font-semibold text-[var(--color-bg-primary)] transition hover:bg-[var(--color-accent-dark)] disabled:opacity-50">
