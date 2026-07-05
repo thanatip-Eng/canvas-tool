@@ -5,6 +5,8 @@ import { useProject } from '@/contexts/ProjectContext';
 import FileUploadZone from '@/components/ui/FileUploadZone';
 import FileVersionList from './FileVersionList';
 import { useToast } from '@/components/ui/Toast';
+import { apiGet } from '@/lib/api-client';
+import { buildXlsx } from '@/lib/xlsx-utils';
 import type { FileGroup } from '@/types';
 
 interface FileGroupConfig {
@@ -57,9 +59,10 @@ const FILE_GROUPS: FileGroupConfig[] = [
 ];
 
 export default function ProjectFileManager() {
-  const { files, uploadFile, deleteFile } = useProject();
+  const { project, files, uploadFile, deleteFile } = useProject();
   const { showToast, ToastContainer } = useToast();
   const [uploadingGroup, setUploadingGroup] = useState<FileGroup | null>(null);
+  const [fetchingCanvas, setFetchingCanvas] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<FileGroup>>(new Set(['canvas', 'registrar', 'score', 'edpuzzle', 'attendance']));
 
   const toggleGroup = useCallback((group: FileGroup) => {
@@ -94,6 +97,50 @@ export default function ProjectFileManager() {
       showToast('ลบไฟล์ไม่สำเร็จ', 'error');
     }
   }, [deleteFile, showToast]);
+
+  const handleFetchFromCanvas = useCallback(async () => {
+    if (!project?.canvasCourseId) {
+      showToast('ไม่พบ Canvas course ID สำหรับโปรเจคนี้', 'error');
+      return;
+    }
+    setFetchingCanvas(true);
+    try {
+      const data = await apiGet<{
+        headers: string[];
+        rows: string[][];
+        stats?: { studentCount: number; assignmentCount: number };
+      }>('/api/canvas/gradebook', { courseId: String(project.canvasCourseId) });
+
+      if (!data.headers || !data.rows) {
+        throw new Error('Canvas ส่งข้อมูลไม่ครบ');
+      }
+
+      const buffer = buildXlsx(data.headers, data.rows, 'Canvas Gradebook');
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+      const filename = `canvas_gradebook_live_${stamp}.xlsx`;
+
+      const file = new File(
+        [buffer.buffer as ArrayBuffer],
+        filename,
+        { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+      );
+
+      await uploadFile('canvas', file);
+      const s = data.stats;
+      showToast(
+        s
+          ? `ดึงจาก Canvas สำเร็จ: ${s.studentCount} นักศึกษา, ${s.assignmentCount} assignments`
+          : 'ดึงจาก Canvas สำเร็จ',
+        'success',
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'ดึงจาก Canvas ไม่สำเร็จ';
+      showToast(msg, 'error');
+    } finally {
+      setFetchingCanvas(false);
+    }
+  }, [project, uploadFile, showToast]);
 
   return (
     <div className="space-y-4">
@@ -142,6 +189,23 @@ export default function ProjectFileManager() {
                   onDelete={handleDelete}
                   emptyMessage={`ยังไม่มีไฟล์ ${cfg.title}`}
                 />
+
+                {/* Canvas-only: fetch gradebook directly */}
+                {cfg.group === 'canvas' && (
+                  <div className="rounded-xl border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/5 p-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-[var(--color-text-primary)]">ดึง Gradebook จาก Canvas โดยตรง</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">ประหยัดขั้นตอน download → upload · ไฟล์ที่ได้จะถูกบันทึกเป็น Canvas Export ใหม่</p>
+                    </div>
+                    <button
+                      onClick={handleFetchFromCanvas}
+                      disabled={fetchingCanvas || !project?.canvasCourseId}
+                      className="rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-sm font-semibold text-[var(--color-bg-primary)] transition hover:bg-[var(--color-accent-dark)] disabled:opacity-50"
+                    >
+                      {fetchingCanvas ? '⏳ กำลังดึง...' : '🔄 ดึงจาก Canvas ตอนนี้'}
+                    </button>
+                  </div>
+                )}
 
                 {/* Upload zone */}
                 <div className="relative">
