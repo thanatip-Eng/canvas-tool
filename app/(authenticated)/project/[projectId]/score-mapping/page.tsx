@@ -8,6 +8,7 @@ import DataTable from '@/components/ui/DataTable';
 import StatCard from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
 import { buildXlsx, downloadXlsx } from '@/lib/xlsx-utils';
+import { buildCsv, downloadCSV } from '@/lib/csv-utils';
 import { validateCanvasFile, extractAssignments } from '@/lib/canvas-utils';
 import { performStudentMatching } from '@/lib/student-matching';
 import { CANVAS_FIXED_COLS, STATUS } from '@/lib/constants';
@@ -63,6 +64,7 @@ export default function ScoreMappingPage() {
   // Step 4: Results
   const [mappingResult, setMappingResult] = useState<MappingResult | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'xlsx' | 'csv'>('xlsx');
 
   // Load Canvas file
   const handleLoadCanvas = useCallback(async (file: ProjectFile) => {
@@ -127,8 +129,8 @@ export default function ScoreMappingPage() {
     setCurrentStep(4);
   }, [canvasData, scoreData, selectedAssignment, assignments, mappingMode, scoreColIdx, attendScore, showToast]);
 
-  // Build XLSX buffer
-  const buildXlsxBuffer = useCallback((): Uint8Array | null => {
+  // Build Canvas-import output as {headers, rows}
+  const buildExportData = useCallback((): { headers: string[]; rows: string[][] } | null => {
     if (!mappingResult || !canvasData) return null;
     const assignmentIdx = mappingResult.assignmentIdx;
     const assignmentName = canvasData.headers[assignmentIdx];
@@ -141,7 +143,7 @@ export default function ScoreMappingPage() {
       newRow[CANVAS_FIXED_COLS] = (result && result.matchedScore !== undefined) ? result.matchedScore : (row[assignmentIdx] || '');
       return newRow;
     });
-    return buildXlsx(exportHeaders, exportRows, 'Map คะแนน');
+    return { headers: exportHeaders, rows: exportRows };
   }, [mappingResult, canvasData]);
 
   // Build XLSX buffer with comparison details (for project save)
@@ -160,13 +162,17 @@ export default function ScoreMappingPage() {
     return buildXlsx(headers, rows, 'Map คะแนน');
   }, [mappingResult, canvasData]);
 
-  // Export XLSX
+  // Export honoring selected format
   const handleExport = useCallback(() => {
-    const buf = buildXlsxBuffer();
-    if (!buf) return;
-    downloadXlsx(buf, 'canvas_grades');
-    showToast('ดาวน์โหลด XLSX สำเร็จ', 'success');
-  }, [buildXlsxBuffer, showToast]);
+    const data = buildExportData();
+    if (!data) return;
+    if (exportFormat === 'csv') {
+      downloadCSV(buildCsv(data.headers, data.rows), 'canvas_grades');
+    } else {
+      downloadXlsx(buildXlsx(data.headers, data.rows, 'Map คะแนน'), 'canvas_grades');
+    }
+    showToast(`ดาวน์โหลด ${exportFormat.toUpperCase()} สำเร็จ`, 'success');
+  }, [buildExportData, exportFormat, showToast]);
 
   // Save to project (use detailed version with comparison)
   const handleSaveToProject = useCallback(async () => {
@@ -326,8 +332,23 @@ export default function ScoreMappingPage() {
         <div className="space-y-6">
           {mappingResult && (
             <>
-              <div className="flex flex-wrap gap-3">
-                <button onClick={handleExport} className="rounded-xl bg-[var(--color-success)] px-6 py-2.5 font-semibold text-white transition hover:opacity-90">📥 ดาวน์โหลด XLSX</button>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1">
+                  {(['xlsx', 'csv'] as const).map(fmt => (
+                    <button
+                      key={fmt}
+                      onClick={() => setExportFormat(fmt)}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                        exportFormat === fmt
+                          ? 'bg-[var(--color-accent)] text-[var(--color-bg-primary)]'
+                          : 'text-[var(--color-text-muted)] hover:bg-white/5'
+                      }`}
+                    >
+                      {fmt.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={handleExport} className="rounded-xl bg-[var(--color-success)] px-6 py-2.5 font-semibold text-white transition hover:opacity-90">📥 ดาวน์โหลด</button>
                 <button onClick={handleSaveToProject} disabled={saving} className="rounded-xl bg-[var(--color-accent)] px-6 py-2.5 font-semibold text-[var(--color-bg-primary)] transition hover:bg-[var(--color-accent-dark)] disabled:opacity-50">
                   {saving ? '💾 กำลังบันทึก...' : '💾 บันทึกไปโปรเจค'}
                 </button>

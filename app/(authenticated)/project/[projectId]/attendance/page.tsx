@@ -8,6 +8,7 @@ import DataTable from '@/components/ui/DataTable';
 import StatCard from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
 import { buildXlsx, downloadXlsx } from '@/lib/xlsx-utils';
+import { buildCsv, downloadCSV } from '@/lib/csv-utils';
 import { validateCanvasFile, extractAssignments, getPointsRowStart } from '@/lib/canvas-utils';
 import {
   parseAttendanceForm,
@@ -76,6 +77,7 @@ export default function AttendancePage() {
   const [results, setResults] = useState<AttendanceMatchRow[] | null>(null);
   const [formOnlyEmails, setFormOnlyEmails] = useState<FormOnlyEmail[]>([]);
   const [saving, setSaving] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'xlsx' | 'csv'>('xlsx');
 
   const handleLoadCanvas = useCallback(async (file: ProjectFile) => {
     setCanvasFile(file);
@@ -170,7 +172,7 @@ export default function AttendancePage() {
     return { total: results.length, both, inOnly, outOnly, absent, bothInvalid, unmatched };
   }, [results]);
 
-  const buildOutputXlsx = useCallback((): Uint8Array | null => {
+  const buildOutputData = useCallback((): { headers: string[]; rows: string[][] } | null => {
     if (!results || !canvasData || selectedAssignmentIdx < 0) return null;
     const assignment = assignments[selectedAssignmentIdx];
     const startRow = getPointsRowStart(canvasData.rows);
@@ -187,10 +189,18 @@ export default function AttendancePage() {
       const scoreStr = r.score !== null ? String(r.score) : (originalRow[assignment.index] || '');
       rows.push([...originalRow.slice(0, CANVAS_FIXED_COLS), scoreStr]);
     }
-    return buildXlsx(headers, rows, 'Attendance');
+    return { headers, rows };
   }, [results, canvasData, selectedAssignmentIdx, assignments]);
 
-  const buildDetailedXlsx = useCallback((): Uint8Array | null => {
+  // Canvas-import output still saved as XLSX to the project since grade-upload flow
+  // parses XLSX; local export honors the selected format.
+  const buildOutputXlsx = useCallback((): Uint8Array | null => {
+    const data = buildOutputData();
+    if (!data) return null;
+    return buildXlsx(data.headers, data.rows, 'Attendance');
+  }, [buildOutputData]);
+
+  const buildDetailedData = useCallback((): { headers: string[]; rows: string[][] } | null => {
     if (!results) return null;
     const headers = ['ชื่อ', 'ID', 'Email', 'สถานะ', 'เวลา check-in', 'เวลา check-out', 'คะแนน', 'หมายเหตุ'];
     const rows = results.map(r => [
@@ -203,22 +213,30 @@ export default function AttendancePage() {
       r.score !== null ? String(r.score) : '',
       r.notes.join(' · '),
     ]);
-    return buildXlsx(headers, rows, 'รายละเอียด');
+    return { headers, rows };
   }, [results]);
 
   const handleDownload = useCallback(() => {
-    const buf = buildOutputXlsx();
-    if (!buf) return;
-    downloadXlsx(buf, 'attendance_canvas_import');
-    showToast('ดาวน์โหลดไฟล์สำหรับ Canvas สำเร็จ', 'success');
-  }, [buildOutputXlsx, showToast]);
+    const data = buildOutputData();
+    if (!data) return;
+    if (exportFormat === 'csv') {
+      downloadCSV(buildCsv(data.headers, data.rows), 'attendance_canvas_import');
+    } else {
+      downloadXlsx(buildXlsx(data.headers, data.rows, 'Attendance'), 'attendance_canvas_import');
+    }
+    showToast(`ดาวน์โหลดไฟล์สำหรับ Canvas สำเร็จ (${exportFormat.toUpperCase()})`, 'success');
+  }, [buildOutputData, exportFormat, showToast]);
 
   const handleDownloadDetail = useCallback(() => {
-    const buf = buildDetailedXlsx();
-    if (!buf) return;
-    downloadXlsx(buf, 'attendance_detail');
-    showToast('ดาวน์โหลดรายละเอียดสำเร็จ', 'success');
-  }, [buildDetailedXlsx, showToast]);
+    const data = buildDetailedData();
+    if (!data) return;
+    if (exportFormat === 'csv') {
+      downloadCSV(buildCsv(data.headers, data.rows), 'attendance_detail');
+    } else {
+      downloadXlsx(buildXlsx(data.headers, data.rows, 'รายละเอียด'), 'attendance_detail');
+    }
+    showToast(`ดาวน์โหลดรายละเอียดสำเร็จ (${exportFormat.toUpperCase()})`, 'success');
+  }, [buildDetailedData, exportFormat, showToast]);
 
   const handleSaveToProject = useCallback(async () => {
     const buf = buildOutputXlsx();
@@ -462,12 +480,27 @@ export default function AttendancePage() {
         <div className="space-y-6">
           {results && stats && (
             <>
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1">
+                  {(['xlsx', 'csv'] as const).map(fmt => (
+                    <button
+                      key={fmt}
+                      onClick={() => setExportFormat(fmt)}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                        exportFormat === fmt
+                          ? 'bg-[var(--color-accent)] text-[var(--color-bg-primary)]'
+                          : 'text-[var(--color-text-muted)] hover:bg-white/5'
+                      }`}
+                    >
+                      {fmt.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
                 <button onClick={handleDownload} className="rounded-xl bg-[var(--color-success)] px-6 py-2.5 font-semibold text-white transition hover:opacity-90">
-                  📥 XLSX สำหรับ Canvas Import
+                  📥 ไฟล์สำหรับ Canvas Import
                 </button>
                 <button onClick={handleDownloadDetail} className="rounded-xl bg-white/10 px-6 py-2.5 font-semibold text-[var(--color-text-primary)] transition hover:bg-white/15">
-                  📋 XLSX รายละเอียด
+                  📋 รายละเอียด
                 </button>
                 <button onClick={handleSaveToProject} disabled={saving} className="rounded-xl bg-[var(--color-accent)] px-6 py-2.5 font-semibold text-[var(--color-bg-primary)] transition hover:bg-[var(--color-accent-dark)] disabled:opacity-50">
                   {saving ? '💾 กำลังบันทึก...' : '💾 บันทึก + ไปหน้าอัปโหลด'}

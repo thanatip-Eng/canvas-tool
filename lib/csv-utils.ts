@@ -77,6 +77,22 @@ export function escapeCSV(val: string | number | null | undefined): string {
 }
 
 /**
+ * Build a CSV string from headers + rows. Values are escaped and joined with commas.
+ * Rows are separated by \r\n so Excel on Windows parses cleanly.
+ */
+export function buildCsv(
+  headers: string[],
+  rows: (string | number | null | undefined)[][]
+): string {
+  const lines: string[] = [];
+  lines.push(headers.map(escapeCSV).join(','));
+  for (const row of rows) {
+    lines.push(row.map(escapeCSV).join(','));
+  }
+  return lines.join('\r\n');
+}
+
+/**
  * Download a CSV string as a file with UTF-8 BOM for proper Thai character display.
  * The filename is suffixed with the current date (YYYY-MM-DD).
  */
