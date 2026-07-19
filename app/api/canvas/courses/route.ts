@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, getCanvasCreds, toErrorResponse } from '@/lib/api-auth';
+import { requireAuth, getCanvasCreds, toErrorResponse, assertCanvasTokenValid } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
       });
 
       if (!response.ok) {
+        assertCanvasTokenValid(response);
         const errorText = await response.text();
         return NextResponse.json(
           { error: `Canvas API Error: ${response.status} - ${errorText}` },

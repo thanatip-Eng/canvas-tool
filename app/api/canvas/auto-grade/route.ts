@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, getCanvasCreds, toErrorResponse } from '@/lib/api-auth';
+import { requireAuth, getCanvasCreds, toErrorResponse, assertCanvasTokenValid } from '@/lib/api-auth';
 
 /**
  * Batch endpoint: fetches all assignments, their submissions, late policy,
@@ -30,6 +30,7 @@ export async function GET(request: NextRequest) {
     while (nextUrl) {
       const res: Response = await fetch(nextUrl, { headers });
       if (!res.ok) {
+        assertCanvasTokenValid(res);
         const errText = await res.text();
         return NextResponse.json(
           { error: `Canvas assignments error: ${res.status} - ${errText}` },
@@ -81,6 +82,7 @@ export async function GET(request: NextRequest) {
 
           while (subUrl) {
             const subRes: Response = await fetch(subUrl, { headers });
+            assertCanvasTokenValid(subRes);
             if (!subRes.ok) break;
             const subData = await subRes.json();
             if (Array.isArray(subData)) subs.push(...subData);
@@ -189,6 +191,7 @@ async function fetchClassicQuizInfo(
         `${canvasUrl}/api/v1/courses/${courseId}/quizzes/${assignment.quiz_id}/submissions?include[]=submission&include[]=submission_history&per_page=100`;
       while (qsUrl) {
         const qsRes: Response = await fetch(qsUrl, { headers });
+        assertCanvasTokenValid(qsRes);
         if (!qsRes.ok) break;
         const qsData = await qsRes.json();
         if (qsData.quiz_submissions) {

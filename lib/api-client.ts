@@ -1,5 +1,33 @@
 import { getFirebaseAuth } from './firebase';
 
+/** Error code the server sends when Canvas rejects the stored access token. */
+export const CANVAS_TOKEN_INVALID = 'CANVAS_TOKEN_INVALID';
+
+/** Thrown by every api-client helper on a non-ok response. Carries the HTTP status
+ *  and the server's error code so callers can branch instead of matching strings. */
+export class ApiClientError extends Error {
+  constructor(message: string, public status: number, public code?: string) {
+    super(message);
+    this.name = 'ApiClientError';
+  }
+
+  /** True when the user's Canvas token is expired or revoked. */
+  get isCanvasTokenInvalid(): boolean {
+    return this.code === CANVAS_TOKEN_INVALID;
+  }
+}
+
+type ReauthHandler = () => void;
+let reauthHandler: ReauthHandler | null = null;
+
+/**
+ * Register a callback fired whenever the server reports an invalid Canvas token.
+ * AuthContext uses this to open the re-auth modal from anywhere in the app.
+ */
+export function onCanvasTokenInvalid(handler: ReauthHandler | null): void {
+  reauthHandler = handler;
+}
+
 async function authHeader(): Promise<Record<string, string>> {
   const user = getFirebaseAuth().currentUser;
   if (!user) throw new Error('Not authenticated');
@@ -20,8 +48,14 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
 
 async function unwrap<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || `Request failed: ${res.status}`);
+    const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+    const err = new ApiClientError(
+      data.error || `Request failed: ${res.status}`,
+      res.status,
+      data.code
+    );
+    if (err.isCanvasTokenInvalid) reauthHandler?.();
+    throw err;
   }
   return res.json() as Promise<T>;
 }

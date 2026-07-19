@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, getCanvasCreds, toErrorResponse } from '@/lib/api-auth';
+import { requireAuth, getCanvasCreds, toErrorResponse, assertCanvasTokenValid, ApiError } from '@/lib/api-auth';
 
 const BATCH_SIZE = 5;
 const MAX_RETRIES = 3;
@@ -109,10 +109,14 @@ export async function POST(request: NextRequest) {
               };
             }
 
+            // A 401 here means the token itself is dead — fail the whole upload rather than
+            // marking every row "no permission", so the client can prompt for a new token.
+            assertCanvasTokenValid(response);
+
             const errorText = await response.text().catch(() => 'Unknown error');
             let errorMsg = `HTTP ${response.status}`;
-            if (response.status === 401 || response.status === 403) {
-              errorMsg = 'ไม่มีสิทธิ์ — ตรวจสอบ API Key และ permission';
+            if (response.status === 403) {
+              errorMsg = 'ไม่มีสิทธิ์ — ตรวจสอบ permission ของบัญชี';
             } else if (response.status === 404) {
               errorMsg = 'ไม่พบนักศึกษาหรือ Assignment';
             } else {
@@ -132,6 +136,8 @@ export async function POST(request: NextRequest) {
               error: errorMsg,
             };
           } catch (err) {
+            // Let a dead token abort the whole upload instead of being reported per row.
+            if (err instanceof ApiError) throw err;
             return {
               sisUserId: grade.sisUserId,
               success: false,

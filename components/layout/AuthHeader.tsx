@@ -2,13 +2,15 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import Image from 'next/image';
+import ReauthModal from '@/components/auth/ReauthModal';
 
 export default function AuthHeader() {
-  const { user, logout } = useAuth();
+  const { user, logout, requestReauth } = useAuth();
 
   if (!user) return null;
 
   return (
+    <>
     <div className="flex items-center justify-between border-b border-white/10 px-6 py-3">
       <h1 className="text-lg font-bold bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-info)] bg-clip-text text-transparent">
         Canvas Tools
@@ -27,6 +29,13 @@ export default function AuthHeader() {
           {user.displayName || user.email}
         </span>
         <button
+          onClick={requestReauth}
+          title="เปลี่ยน Canvas Access Token"
+          className="rounded-lg bg-white/5 px-3 py-1.5 text-sm text-[var(--color-text-muted)] transition hover:bg-white/10 hover:text-[var(--color-text-primary)]"
+        >
+          Canvas Token
+        </button>
+        <button
           onClick={logout}
           className="rounded-lg bg-white/5 px-3 py-1.5 text-sm text-[var(--color-text-muted)] transition hover:bg-white/10 hover:text-[var(--color-danger)]"
         >
@@ -34,5 +43,7 @@ export default function AuthHeader() {
         </button>
       </div>
     </div>
+    <ReauthModal />
+    </>
   );
 }

@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { User, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getFirebaseAuth, getFirebaseDb, isFirebaseConfigured } from '@/lib/firebase';
+import { onCanvasTokenInvalid } from '@/lib/api-client';
 
 interface AuthContextType {
   user: User | null;
@@ -11,9 +12,15 @@ interface AuthContextType {
   canvasUrl: string;
   loading: boolean;
   firebaseReady: boolean;
+  /** True once Canvas has rejected the stored token, or the user asked to change it. */
+  needsReauth: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
   saveApiKey: (key: string, url: string) => Promise<void>;
+  /** Open the Canvas token prompt (used by the header's "change token" button). */
+  requestReauth: () => void;
+  /** Dismiss the prompt without saving. */
+  dismissReauth: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -24,6 +31,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [canvasUrl, setCanvasUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [firebaseReady, setFirebaseReady] = useState(false);
+  const [needsReauth, setNeedsReauth] = useState(false);
+
+  // Any api-client call that hits CANVAS_TOKEN_INVALID opens the prompt, wherever it fired from.
+  useEffect(() => {
+    onCanvasTokenInvalid(() => setNeedsReauth(true));
+    return () => onCanvasTokenInvalid(null);
+  }, []);
 
   useEffect(() => {
     if (!isFirebaseConfigured()) {
@@ -72,6 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOut(getFirebaseAuth());
     setApiKey('');
     setCanvasUrl('');
+    setNeedsReauth(false);
   }, []);
 
   const saveApiKey = useCallback(async (key: string, url: string) => {
@@ -83,10 +98,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, { merge: true });
     setApiKey(key);
     setCanvasUrl(normalizedUrl);
+    setNeedsReauth(false);
   }, [user]);
 
+  const requestReauth = useCallback(() => setNeedsReauth(true), []);
+  const dismissReauth = useCallback(() => setNeedsReauth(false), []);
+
   return (
-    <AuthContext.Provider value={{ user, apiKey, canvasUrl, loading, firebaseReady, login, logout, saveApiKey }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        apiKey,
+        canvasUrl,
+        loading,
+        firebaseReady,
+        needsReauth,
+        login,
+        logout,
+        saveApiKey,
+        requestReauth,
+        dismissReauth,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

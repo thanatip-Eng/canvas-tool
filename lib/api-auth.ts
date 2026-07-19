@@ -3,8 +3,30 @@ import { getAdminAuth, getAdminDb } from './firebase-admin';
 import { checkRateLimit } from './rate-limit';
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) {
+  constructor(message: string, public status: number, public code?: string) {
     super(message);
+  }
+}
+
+/**
+ * Error code returned when Canvas rejects our stored access token.
+ * The client keys off this to prompt for a new token instead of showing a raw error.
+ */
+export const CANVAS_TOKEN_INVALID = 'CANVAS_TOKEN_INVALID';
+
+/**
+ * Call this on every Canvas `Response` before the route's own !ok handling.
+ * Canvas answers 401 when the access token is expired or revoked; without this
+ * each route degrades differently (empty list / 200 with an error field / 500),
+ * so an expired token looks like "no data" instead of "log in again".
+ */
+export function assertCanvasTokenValid(response: Response): void {
+  if (response.status === 401) {
+    throw new ApiError(
+      'Canvas Access Token หมดอายุหรือถูกเพิกถอน กรุณาใส่ Token ใหม่',
+      401,
+      CANVAS_TOKEN_INVALID
+    );
   }
 }
 
@@ -97,7 +119,10 @@ export function assertOwnsStoragePath(uid: string, storagePath: string): void {
  */
 export function toErrorResponse(err: unknown): NextResponse {
   if (err instanceof ApiError) {
-    return NextResponse.json({ error: err.message }, { status: err.status });
+    return NextResponse.json(
+      { error: err.message, ...(err.code ? { code: err.code } : {}) },
+      { status: err.status }
+    );
   }
   console.error('Unhandled API error:', err);
   return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

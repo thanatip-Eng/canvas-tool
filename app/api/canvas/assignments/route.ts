@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, getCanvasCreds, toErrorResponse } from '@/lib/api-auth';
+import { requireAuth, getCanvasCreds, toErrorResponse, assertCanvasTokenValid } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,7 +23,8 @@ export async function GET(request: NextRequest) {
       });
 
       if (!response.ok) {
-        if (response.status === 403 || response.status === 401) {
+        assertCanvasTokenValid(response);
+        if (response.status === 403) {
           return NextResponse.json({ assignments: [], message: 'No permission to access assignments' });
         }
         const errorText = await response.text();

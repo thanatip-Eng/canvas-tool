@@ -2,15 +2,12 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import CanvasCredsForm from '@/components/auth/CanvasCredsForm';
 
 export default function LoginPage() {
-  const { user, apiKey, canvasUrl, loading, firebaseReady, login, saveApiKey } = useAuth();
+  const { user, apiKey, canvasUrl, loading, firebaseReady, login } = useAuth();
   const router = useRouter();
-  const [inputApiKey, setInputApiKey] = useState('');
-  const [inputCanvasUrl, setInputCanvasUrl] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
 
   // Redirect to courses if fully authenticated
   useEffect(() => {
@@ -92,70 +89,17 @@ export default function LoginPage() {
     );
   }
 
-  // Step 2: API Key Input
+  // Step 2: Canvas credentials
   if (!apiKey || !canvasUrl) {
-    const handleSave = async () => {
-      if (!inputApiKey.trim() || !inputCanvasUrl.trim()) {
-        setError('กรุณากรอกข้อมูลให้ครบ');
-        return;
-      }
-      setSaving(true);
-      setError('');
-      try {
-        await saveApiKey(inputApiKey.trim(), inputCanvasUrl.trim());
-      } catch (err) {
-        setError('ไม่สามารถบันทึกได้ กรุณาลองใหม่');
-        console.error(err);
-      } finally {
-        setSaving(false);
-      }
-    };
-
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="glass-card w-full max-w-md p-8">
           <h2 className="mb-2 text-xl font-bold text-[var(--color-text-primary)]">ตั้งค่า Canvas API</h2>
           <p className="mb-6 text-sm text-[var(--color-text-muted)]">
-            ใส่ URL ของ Canvas และ API Key เพื่อเชื่อมต่อกับระบบ
+            ใส่ URL ของ Canvas และ Access Token เพื่อเชื่อมต่อกับระบบ
           </p>
 
-          <div className="space-y-4">
-            <div>
-              <label className="mb-1 block text-sm text-[var(--color-text-muted)]">Canvas URL</label>
-              <input
-                type="url"
-                placeholder="https://canvas.university.ac.th"
-                value={inputCanvasUrl}
-                onChange={(e) => setInputCanvasUrl(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none transition focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm text-[var(--color-text-muted)]">API Key</label>
-              <input
-                type="password"
-                placeholder="Canvas API Key"
-                value={inputApiKey}
-                onChange={(e) => setInputApiKey(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none transition focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
-              />
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                ไปที่ Canvas → Account → Settings → New Access Token
-              </p>
-            </div>
-
-            {error && (
-              <p className="text-sm text-[var(--color-danger)]">{error}</p>
-            )}
-
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="w-full rounded-xl bg-[var(--color-accent)] px-6 py-3 font-semibold text-[var(--color-bg-primary)] transition hover:bg-[var(--color-accent-dark)] disabled:opacity-50"
-            >
-              {saving ? 'กำลังบันทึก...' : 'บันทึกและเริ่มใช้งาน'}
-            </button>
-          </div>
+          <CanvasCredsForm initialCanvasUrl={canvasUrl} />
         </div>
       </div>
     );

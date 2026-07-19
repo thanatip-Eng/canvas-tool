@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, getCanvasCreds, toErrorResponse } from '@/lib/api-auth';
+import { requireAuth, getCanvasCreds, toErrorResponse, assertCanvasTokenValid } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     );
 
     if (!assignmentRes.ok) {
+      assertCanvasTokenValid(assignmentRes);
       return NextResponse.json({ error: 'Failed to fetch assignment' }, { status: 400 });
     }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, getCanvasCreds, toErrorResponse } from '@/lib/api-auth';
+import { requireAuth, getCanvasCreds, toErrorResponse, assertCanvasTokenValid, ApiError } from '@/lib/api-auth';
 
 /**
  * Rebuild the Canvas gradebook export shape by fanning out roster + assignments + bulk submissions.
@@ -55,8 +55,9 @@ async function paginatedGet<T>(url: string, apiKey: string): Promise<T[]> {
       },
     });
     if (!response.ok) {
+      assertCanvasTokenValid(response);
       const errorText = await response.text();
-      throw new Error(`Canvas API ${response.status}: ${errorText}`);
+      throw new ApiError(`Canvas API ${response.status}: ${errorText}`, response.status);
     }
     const page = await response.json();
     if (Array.isArray(page)) results.push(...(page as T[]));
