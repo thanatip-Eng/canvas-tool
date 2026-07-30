@@ -38,8 +38,15 @@ export default function CanvasCredsForm({
       await saveApiKey(inputApiKey.trim(), inputCanvasUrl.trim());
       onSaved?.();
     } catch (err) {
-      setError('ไม่สามารถบันทึกได้ กรุณาลองใหม่');
-      console.error(err);
+      // Surface Firebase's reason (e.g. permission-denied) instead of a blanket
+      // "try again" so a rules/URL problem is diagnosable without the console.
+      const code = (err as { code?: string })?.code;
+      const detail =
+        code === 'permission-denied'
+          ? 'ไม่มีสิทธิ์เขียนข้อมูล (ตรวจสอบ Firestore rules หรือรูปแบบ URL ต้องขึ้นต้น https://)'
+          : code || (err instanceof Error ? err.message : 'ไม่ทราบสาเหตุ');
+      setError(`ไม่สามารถบันทึกได้: ${detail}`);
+      console.error('saveApiKey failed:', err);
     } finally {
       setSaving(false);
     }

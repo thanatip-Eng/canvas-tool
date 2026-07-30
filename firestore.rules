@@ -7,16 +7,30 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    // Shape check for the two Canvas credential fields.
+    function validCanvasCreds() {
+      return request.resource.data.apiKey is string
+        && request.resource.data.apiKey.size() < 500
+        && request.resource.data.canvasUrl is string
+        && request.resource.data.canvasUrl.matches('^https://.+');
+    }
+
     // The user's profile doc holds their Canvas apiKey + canvasUrl.
     // Validate shape on writes so a compromised client can't store arbitrary data.
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow write: if isOwner(userId)
+
+      // First write creates the doc with exactly the two credential fields.
+      allow create: if isOwner(userId)
         && request.resource.data.keys().hasOnly(['apiKey', 'canvasUrl'])
-        && request.resource.data.apiKey is string
-        && request.resource.data.apiKey.size() < 500
-        && request.resource.data.canvasUrl is string
-        && request.resource.data.canvasUrl.matches('^https://.+');
+        && validCanvasCreds();
+
+      // saveApiKey re-saves with merge:true, so request.resource.data is the whole
+      // merged doc — checking its full key set with hasOnly wrongly rejects the write
+      // whenever any other field exists on the doc. Gate on what actually changed.
+      allow update: if isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['apiKey', 'canvasUrl'])
+        && validCanvasCreds();
 
       // Projects, files, outputs, and any future subcollections.
       // These are written exclusively from the client SDK today, so we keep
