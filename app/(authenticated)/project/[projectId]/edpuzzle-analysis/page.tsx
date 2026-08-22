@@ -174,6 +174,10 @@ export default function EdpuzzleAnalysisPage() {
   const [canvasAssignments, setCanvasAssignments] = useState<any[]>([]);
   const [loadingCanvasAssignments, setLoadingCanvasAssignments] = useState(false);
 
+  // Step 1: score source when master data exists — pull live from Canvas API,
+  // or reuse the scores already in the uploaded Canvas export (master data).
+  const [scoreSource, setScoreSource] = useState<'api' | 'export'>('api');
+
   // Step 1: Assignment selection (from master data)
   const [selectedMasterAssignment, setSelectedMasterAssignment] = useState<MasterAssignment | null>(null);
   const [selectedAssignment, setSelectedAssignment] = useState<CanvasAssignment | null>(null);
@@ -255,7 +259,51 @@ export default function EdpuzzleAnalysisPage() {
     }
   }, [fetchLatePolicy, courseId]);
 
+  // Build the Canvas score map straight from the uploaded export (master data),
+  // no API call. Late-penalty fields aren't in the export, so they default to none.
+  const buildScoresFromMaster = useCallback((assignment: MasterAssignment) => {
+    const scoreMap = new Map<string, { name: string; score: number | null; enteredScore: number | null; pointsDeducted: number | null; secondsLate: number; isLate: boolean; section: string }>();
+    if (!masterData) return scoreMap;
+    for (const row of masterData.rows) {
+      const sisId = (row[2] || '').trim();
+      if (!sisId) continue;
+      const raw = (row[assignment.columnIndex] ?? '').trim();
+      const num = raw === '' ? null : Number(raw);
+      const score = num !== null && Number.isFinite(num) ? num : null;
+      scoreMap.set(sisId, {
+        name: row[0] || '',
+        score,
+        enteredScore: score,
+        pointsDeducted: null,
+        secondsLate: 0,
+        isLate: false,
+        section: row[5] || '',
+      });
+    }
+    return scoreMap;
+  }, [masterData]);
+
   const handleSelectAssignment = useCallback(async (assignment: MasterAssignment) => {
+    if (!assignment.id && scoreSource === 'api') {
+      showToast('ไม่พบ Assignment ID', 'error');
+      return;
+    }
+
+    // Export mode: read scores from the master data, skip Canvas entirely.
+    if (scoreSource === 'export') {
+      setSelectedAssignment({
+        id: Number(assignment.id) || 0,
+        name: assignment.name,
+        points_possible: assignment.pointsPossible,
+        due_at: null,
+      });
+      const scoreMap = buildScoresFromMaster(assignment);
+      setCanvasScores(scoreMap);
+      showToast(`ใช้คะแนนจาก Canvas export: ${scoreMap.size} คน`, 'success');
+      setCurrentStep(2);
+      return;
+    }
+
     if (!courseId || !assignment.id) {
       showToast('ไม่พบ Assignment ID', 'error');
       return;
@@ -305,7 +353,7 @@ export default function EdpuzzleAnalysisPage() {
     } finally {
       setLoadingScores(false);
     }
-  }, [courseId, showToast]);
+  }, [courseId, showToast, scoreSource, buildScoresFromMaster]);
 
   const handleFetchCanvasAssignments = useCallback(async () => {
     if (!courseId) {
@@ -1026,6 +1074,26 @@ export default function EdpuzzleAnalysisPage() {
                 >
                   {loadingCanvasAssignments ? 'กำลังดึง...' : 'ดึง Assignment จาก Canvas'}
                 </button>
+              </div>
+            )}
+
+            {/* Master data path: choose score source */}
+            {masterData && masterData.assignments.length > 0 && (
+              <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.02] p-3 sm:flex-row">
+                <label className={`flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg p-2.5 transition ${scoreSource === 'api' ? 'bg-[var(--color-accent)]/10 border border-[var(--color-accent)]/30' : 'hover:bg-white/5 border border-transparent'}`}>
+                  <input type="radio" name="scoreSource" checked={scoreSource === 'api'} onChange={() => setScoreSource('api')} className="mt-0.5 accent-[var(--color-accent)]" />
+                  <span className="text-sm">
+                    <span className="block font-medium text-[var(--color-text-primary)]">ดึงคะแนนอัตโนมัติจาก Canvas</span>
+                    <span className="block text-xs text-[var(--color-text-muted)]">คะแนนล่าสุด + ข้อมูลส่งสาย (ต้องต่อ Canvas)</span>
+                  </span>
+                </label>
+                <label className={`flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg p-2.5 transition ${scoreSource === 'export' ? 'bg-[var(--color-accent)]/10 border border-[var(--color-accent)]/30' : 'hover:bg-white/5 border border-transparent'}`}>
+                  <input type="radio" name="scoreSource" checked={scoreSource === 'export'} onChange={() => setScoreSource('export')} className="mt-0.5 accent-[var(--color-accent)]" />
+                  <span className="text-sm">
+                    <span className="block font-medium text-[var(--color-text-primary)]">ใช้คะแนนจาก Canvas export</span>
+                    <span className="block text-xs text-[var(--color-text-muted)]">คะแนนจากไฟล์ข้อมูลหลัก (เร็ว ไม่ต้องต่อ Canvas · ไม่มีข้อมูลสาย)</span>
+                  </span>
+                </label>
               </div>
             )}
 

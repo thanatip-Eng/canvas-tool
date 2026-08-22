@@ -1,6 +1,6 @@
 [
   {
-    "origin": ["http://localhost:3000", "http://localhost:3001"],
+    "origin": ["http://localhost:3000", "http://localhost:3001", "https://canvas-tool-v2.vercel.app"],
     "method": ["GET", "POST", "PUT", "DELETE", "HEAD"],
     "maxAgeSeconds": 3600,
     "responseHeaders": [
