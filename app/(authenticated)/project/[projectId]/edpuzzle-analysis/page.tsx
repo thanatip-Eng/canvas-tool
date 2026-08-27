@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useProject } from '@/contexts/ProjectContext';
-import { apiGet } from '@/lib/api-client';
+import { apiGet, apiPostJson } from '@/lib/api-client';
 import StepWizard from '@/components/ui/StepWizard';
 import FileSelector from '@/components/project/FileSelector';
 import SourceFilesSummary from '@/components/project/SourceFilesSummary';
@@ -200,6 +200,13 @@ export default function EdpuzzleAnalysisPage() {
   // Step 4: Results
   const [results, setResults] = useState<MatchedStudent[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Step 4: recover missing Canvas scores (send one student at a time)
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryCandidates, setRecoveryCandidates] = useState<{ sisUserId: string; name: string; score: number }[]>([]);
+  const [rowStatus, setRowStatus] = useState<Record<string, 'idle' | 'confirm' | 'sending' | 'done' | 'error'>>({});
+  const [rowError, setRowError] = useState<Record<string, string>>({});
 
   // Bookmarklet paste UI
   const [showBookmarklet, setShowBookmarklet] = useState(false);
@@ -984,6 +991,78 @@ export default function EdpuzzleAnalysisPage() {
     }
   }, [buildXlsxBuffer, results, edpuzzleFilename, assignmentName, edpuzzleData, totalQuestions, saveOutput, showToast]);
 
+  // ==================== Step 4: recover missing Canvas scores ====================
+
+  // Open the recovery panel: re-fetch LIVE Canvas scores now, then list only students
+  // who have a computed score but whose Canvas score is currently blank. Computing the
+  // list against fresh data (not the analysis-time snapshot) guarantees we never target
+  // someone who already has a score.
+  const handleOpenRecovery = useCallback(async () => {
+    if (!courseId || !selectedAssignment) return;
+    setShowRecovery(true);
+    setRecoveryLoading(true);
+    setRowStatus({});
+    setRowError({});
+    try {
+      const data = await apiGet<{ submissions?: CanvasSubmission[] }>(
+        '/api/canvas/assignment-submissions',
+        { courseId: String(courseId), assignmentId: String(selectedAssignment.id) }
+      );
+      const liveScore = new Map<string, number | null>();
+      for (const sub of data.submissions || []) {
+        const sis = sub.user?.sis_user_id;
+        if (sis) liveScore.set(sis, sub.score);
+      }
+      // Only students Canvas knows (has a submission row) whose score is null → truly missing.
+      const cands = results
+        .filter(r => r.studentId && r.edpuzzleScaledScore != null)
+        .filter(r => liveScore.has(r.studentId) && liveScore.get(r.studentId) === null)
+        .map(r => ({ sisUserId: r.studentId, name: r.studentName, score: r.edpuzzleScaledScore as number }));
+      setRecoveryCandidates(cands);
+    } catch {
+      showToast('ไม่สามารถดึงคะแนนปัจจุบันจาก Canvas ได้', 'error');
+      setShowRecovery(false);
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }, [courseId, selectedAssignment, results, showToast]);
+
+  // Send exactly one student's score to Canvas via the existing grade-upload route.
+  const handleSendOne = useCallback(async (sisUserId: string, score: number) => {
+    if (!courseId || !selectedAssignment) return;
+    setRowStatus(s => ({ ...s, [sisUserId]: 'sending' }));
+    try {
+      const data = await apiPostJson<{
+        results?: { success: boolean; error?: string }[];
+        error?: string;
+      }>('/api/canvas/grade-upload', {
+        courseId: String(courseId),
+        assignmentId: String(selectedAssignment.id),
+        grades: [{ sisUserId, score }],
+      });
+      if (data.error && !data.results) throw new Error(data.error);
+      const r0 = data.results?.[0];
+      if (r0 && !r0.success) throw new Error(r0.error || 'ส่งไม่สำเร็จ');
+      setRowStatus(s => ({ ...s, [sisUserId]: 'done' }));
+    } catch (err) {
+      setRowStatus(s => ({ ...s, [sisUserId]: 'error' }));
+      setRowError(e => ({ ...e, [sisUserId]: err instanceof Error ? err.message : 'ส่งไม่สำเร็จ' }));
+    }
+  }, [courseId, selectedAssignment]);
+
+  // Two-tap guard: first tap arms the row (idle/error → confirm), second tap sends.
+  const handleRowTap = useCallback((sisUserId: string, score: number) => {
+    setRowStatus(prev => {
+      const st = prev[sisUserId] || 'idle';
+      if (st === 'confirm') {
+        handleSendOne(sisUserId, score);
+        return prev;
+      }
+      if (st === 'idle' || st === 'error') return { ...prev, [sisUserId]: 'confirm' };
+      return prev;
+    });
+  }, [handleSendOne]);
+
   const handleReset = useCallback(() => {
     setCurrentStep(1);
     setSelectedMasterAssignment(null);
@@ -998,6 +1077,10 @@ export default function EdpuzzleAnalysisPage() {
     setConfigLoaded(false);
     setNoMasterMode(false);
     setCanvasAssignments([]);
+    setShowRecovery(false);
+    setRecoveryCandidates([]);
+    setRowStatus({});
+    setRowError({});
   }, []);
 
   // ==================== Stats for Step 4 ====================
@@ -1574,6 +1657,110 @@ export default function EdpuzzleAnalysisPage() {
                   </button>
                   <button className="btn btn-secondary" onClick={handleReset}>เริ่มใหม่</button>
                 </div>
+
+                {/* Recover missing Canvas scores — send one student at a time */}
+                {pointsPossible !== null && (
+                  <div className="glass-card p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-[var(--color-text-primary)]">
+                          🛟 ส่งคะแนนให้คนที่ Canvas ตกหล่น
+                        </p>
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          เฉพาะคนที่ <strong>Canvas ยังไม่มีคะแนน</strong> — ตรวจสดจาก Canvas ตอนกดเปิด, ส่งทีละคน, ยืนยันก่อนส่ง
+                        </p>
+                      </div>
+                      {!showRecovery ? (
+                        <button
+                          onClick={handleOpenRecovery}
+                          disabled={recoveryLoading}
+                          className="rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-sm font-semibold text-[var(--color-bg-primary)] transition hover:bg-[var(--color-accent-dark)] disabled:opacity-50"
+                        >
+                          {recoveryLoading ? 'กำลังตรวจ Canvas...' : 'เปิดรายการคนตกหล่น'}
+                        </button>
+                      ) : (
+                        <button onClick={handleOpenRecovery} disabled={recoveryLoading} className="btn btn-secondary text-sm">
+                          {recoveryLoading ? 'กำลังตรวจ...' : '🔄 ตรวจใหม่'}
+                        </button>
+                      )}
+                    </div>
+
+                    {showRecovery && (
+                      <div className="mt-4 space-y-3">
+                        <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-300">
+                          ⚠️ คะแนนที่ส่งเข้า assignment ที่ผูกกับ Edpuzzle อาจถูก Edpuzzle sync ทับภายหลัง — ถ้าต้องการให้อยู่ถาวร ควรใช้ column ที่ไม่ผูก Edpuzzle. ส่งค่า EP (เต็ม {pointsPossible}) แบบถ่วงตามจำนวนข้อ
+                        </div>
+
+                        {recoveryLoading && (
+                          <div className="flex items-center gap-2 text-sm text-[var(--color-accent)]">
+                            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-accent)] border-t-transparent" />
+                            กำลังตรวจคะแนนปัจจุบันจาก Canvas...
+                          </div>
+                        )}
+
+                        {!recoveryLoading && recoveryCandidates.length === 0 && (
+                          <p className="py-4 text-center text-sm text-[var(--color-text-muted)]">
+                            🎉 ไม่มีคนที่ Canvas ตกหล่น — ทุกคนที่มีคะแนนมีใน Canvas ครบแล้ว
+                          </p>
+                        )}
+
+                        {!recoveryLoading && recoveryCandidates.length > 0 && (
+                          <>
+                            <p className="text-sm text-[var(--color-text-muted)]">
+                              พบ {recoveryCandidates.length} คน — assignment ปลายทาง: <strong className="text-[var(--color-text-primary)]">{selectedAssignment?.name}</strong>
+                            </p>
+                            <div className="max-h-96 space-y-1 overflow-y-auto rounded-lg border border-white/10 p-2">
+                              {recoveryCandidates.map((c) => {
+                                const st = rowStatus[c.sisUserId] || 'idle';
+                                return (
+                                  <div key={c.sisUserId} className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-white/5">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="truncate text-sm text-[var(--color-text-primary)]">{c.name}</p>
+                                      <p className="text-xs text-[var(--color-text-muted)]">{c.sisUserId}</p>
+                                    </div>
+                                    <span className="rounded bg-white/10 px-2 py-0.5 text-sm font-medium text-[var(--color-text-primary)]">
+                                      {c.score} / {pointsPossible}
+                                    </span>
+                                    {st === 'done' ? (
+                                      <span className="text-sm font-medium text-[var(--color-success)]">✓ ส่งแล้ว</span>
+                                    ) : st === 'sending' ? (
+                                      <span className="flex items-center gap-1.5 text-sm text-[var(--color-accent)]">
+                                        <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--color-accent)] border-t-transparent" />
+                                        กำลังส่ง
+                                      </span>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleRowTap(c.sisUserId, c.score)}
+                                        className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                                          st === 'confirm'
+                                            ? 'bg-[var(--color-warning)] text-black hover:opacity-90'
+                                            : st === 'error'
+                                            ? 'bg-[var(--color-danger)]/20 text-[var(--color-danger)] hover:bg-[var(--color-danger)]/30'
+                                            : 'bg-[var(--color-accent)] text-[var(--color-bg-primary)] hover:bg-[var(--color-accent-dark)]'
+                                        }`}
+                                      >
+                                        {st === 'confirm'
+                                          ? `ยืนยันส่ง ${c.score}?`
+                                          : st === 'error'
+                                          ? 'ลองใหม่'
+                                          : 'ส่งเข้า Canvas'}
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {Object.values(rowError).length > 0 && (
+                              <p className="text-xs text-[var(--color-danger)]">
+                                บางรายการส่งไม่สำเร็จ — กด "ลองใหม่" ที่แถวนั้น
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {stats && (
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
