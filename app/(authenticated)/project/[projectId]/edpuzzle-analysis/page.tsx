@@ -207,6 +207,8 @@ export default function EdpuzzleAnalysisPage() {
   const [recoveryCandidates, setRecoveryCandidates] = useState<{ sisUserId: string; name: string; score: number }[]>([]);
   const [rowStatus, setRowStatus] = useState<Record<string, 'idle' | 'confirm' | 'sending' | 'done' | 'error'>>({});
   const [rowError, setRowError] = useState<Record<string, string>>({});
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkSending, setBulkSending] = useState(false);
 
   // Bookmarklet paste UI
   const [showBookmarklet, setShowBookmarklet] = useState(false);
@@ -1003,6 +1005,7 @@ export default function EdpuzzleAnalysisPage() {
     setRecoveryLoading(true);
     setRowStatus({});
     setRowError({});
+    setBulkConfirm(false);
     try {
       const data = await apiGet<{ submissions?: CanvasSubmission[] }>(
         '/api/canvas/assignment-submissions',
@@ -1063,6 +1066,63 @@ export default function EdpuzzleAnalysisPage() {
     });
   }, [handleSendOne]);
 
+  // Send every not-yet-sent candidate in one batched call to Canvas.
+  const handleSendAll = useCallback(async () => {
+    if (!courseId || !selectedAssignment) return;
+    const pending = recoveryCandidates.filter(c => {
+      const st = rowStatus[c.sisUserId];
+      return st !== 'done' && st !== 'sending';
+    });
+    if (pending.length === 0) return;
+
+    setBulkSending(true);
+    setRowStatus(s => {
+      const n = { ...s };
+      pending.forEach(c => { n[c.sisUserId] = 'sending'; });
+      return n;
+    });
+    try {
+      const data = await apiPostJson<{
+        results?: { sisUserId: string; success: boolean; error?: string }[];
+        error?: string;
+      }>('/api/canvas/grade-upload', {
+        courseId: String(courseId),
+        assignmentId: String(selectedAssignment.id),
+        grades: pending.map(c => ({ sisUserId: c.sisUserId, score: c.score })),
+      });
+      if (data.error && !data.results) throw new Error(data.error);
+      const byId = new Map((data.results || []).map(r => [r.sisUserId, r]));
+      setRowStatus(s => {
+        const n = { ...s };
+        pending.forEach(c => { const r = byId.get(c.sisUserId); n[c.sisUserId] = r && r.success ? 'done' : 'error'; });
+        return n;
+      });
+      setRowError(e => {
+        const n = { ...e };
+        pending.forEach(c => { const r = byId.get(c.sisUserId); if (r && !r.success) n[c.sisUserId] = r.error || 'ส่งไม่สำเร็จ'; });
+        return n;
+      });
+      const okCount = (data.results || []).filter(r => r.success).length;
+      showToast(`ส่งสำเร็จ ${okCount}/${pending.length} คน`, okCount === pending.length ? 'success' : 'warning');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'ส่งไม่สำเร็จ';
+      setRowStatus(s => {
+        const n = { ...s };
+        pending.forEach(c => { n[c.sisUserId] = 'error'; });
+        return n;
+      });
+      setRowError(e => {
+        const n = { ...e };
+        pending.forEach(c => { n[c.sisUserId] = msg; });
+        return n;
+      });
+      showToast(`ส่งทั้งหมดไม่สำเร็จ: ${msg}`, 'error');
+    } finally {
+      setBulkSending(false);
+      setBulkConfirm(false);
+    }
+  }, [courseId, selectedAssignment, recoveryCandidates, rowStatus, showToast]);
+
   const handleReset = useCallback(() => {
     setCurrentStep(1);
     setSelectedMasterAssignment(null);
@@ -1081,6 +1141,8 @@ export default function EdpuzzleAnalysisPage() {
     setRecoveryCandidates([]);
     setRowStatus({});
     setRowError({});
+    setBulkConfirm(false);
+    setBulkSending(false);
   }, []);
 
   // ==================== Stats for Step 4 ====================
@@ -1704,11 +1766,40 @@ export default function EdpuzzleAnalysisPage() {
                           </p>
                         )}
 
-                        {!recoveryLoading && recoveryCandidates.length > 0 && (
+                        {!recoveryLoading && recoveryCandidates.length > 0 && (() => {
+                          const pendingCount = recoveryCandidates.filter(c => {
+                            const st = rowStatus[c.sisUserId];
+                            return st !== 'done' && st !== 'sending';
+                          }).length;
+                          return (
                           <>
-                            <p className="text-sm text-[var(--color-text-muted)]">
-                              พบ {recoveryCandidates.length} คน — assignment ปลายทาง: <strong className="text-[var(--color-text-primary)]">{selectedAssignment?.name}</strong>
-                            </p>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-sm text-[var(--color-text-muted)]">
+                                พบ {recoveryCandidates.length} คน — assignment ปลายทาง: <strong className="text-[var(--color-text-primary)]">{selectedAssignment?.name}</strong>
+                              </p>
+                              {pendingCount > 0 && (
+                                <button
+                                  onClick={() => { if (bulkConfirm) handleSendAll(); else setBulkConfirm(true); }}
+                                  disabled={bulkSending}
+                                  className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition disabled:opacity-50 ${
+                                    bulkConfirm
+                                      ? 'bg-[var(--color-warning)] text-black hover:opacity-90'
+                                      : 'bg-[var(--color-accent)] text-[var(--color-bg-primary)] hover:bg-[var(--color-accent-dark)]'
+                                  }`}
+                                >
+                                  {bulkSending
+                                    ? 'กำลังส่งทั้งหมด...'
+                                    : bulkConfirm
+                                    ? `ยืนยันส่งทั้งหมด ${pendingCount} คน?`
+                                    : `เลือกทั้งหมด → ส่งเข้า Canvas (${pendingCount})`}
+                                </button>
+                              )}
+                            </div>
+                            {bulkConfirm && !bulkSending && (
+                              <p className="text-xs text-[var(--color-warning)]">
+                                จะส่งคะแนนให้ {pendingCount} คนที่ยังไม่ส่ง — กดปุ่มอีกครั้งเพื่อยืนยัน หรือ <button onClick={() => setBulkConfirm(false)} className="underline">ยกเลิก</button>
+                              </p>
+                            )}
                             <div className="max-h-96 space-y-1 overflow-y-auto rounded-lg border border-white/10 p-2">
                               {recoveryCandidates.map((c) => {
                                 const st = rowStatus[c.sisUserId] || 'idle';
@@ -1756,7 +1847,8 @@ export default function EdpuzzleAnalysisPage() {
                               </p>
                             )}
                           </>
-                        )}
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
